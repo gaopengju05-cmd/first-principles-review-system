@@ -257,19 +257,42 @@ button:disabled {
 
 .project-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   gap: 8px;
   width: 100%;
   min-height: 88px;
   border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.06);
   color: #f6f7fb;
+  padding: 12px;
   text-align: left;
 }
 
 .project-row.is-active {
   border-color: rgba(143, 227, 207, 0.65);
   background: rgba(143, 227, 207, 0.12);
+}
+
+.project-select-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  justify-content: stretch;
+  gap: 8px;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.project-select-button:hover {
+  transform: none;
+}
+
+.project-delete-button {
+  align-self: start;
 }
 
 .project-row-title {

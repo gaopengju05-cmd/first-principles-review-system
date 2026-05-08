@@ -337,6 +337,42 @@ function App() {
     setProjectForm({ name: "", description: "", category: projectForm.category });
   };
 
+  const deleteProject = (projectId) => {
+    const project = data.projects.find((item) => item.id === projectId);
+    if (!project) return;
+    const confirmed = window.confirm(
+      `确定删除项目「${project.name}」吗？关联的任务、想法和事件也会一起删除。`,
+    );
+    if (!confirmed) return;
+
+    updateData((current) => {
+      const remainingProjects = current.projects.filter((item) => item.id !== projectId);
+      const nextActiveProjectId =
+        current.settings.activeProjectId === projectId
+          ? remainingProjects[0]?.id || null
+          : current.settings.activeProjectId;
+
+      return {
+        ...current,
+        projects: remainingProjects,
+        tasks: current.tasks.filter((task) => task.projectId !== projectId),
+        ideas: current.ideas.filter((idea) => idea.linkedProjectId !== projectId),
+        events: current.events.filter((dailyEvent) => dailyEvent.projectId !== projectId),
+        settings: { ...current.settings, activeProjectId: nextActiveProjectId },
+      };
+    });
+
+    if (eventForm.projectId === projectId) {
+      setEventForm((current) => ({ ...current, projectId: "" }));
+    }
+    if (ideaForm.linkedProjectId === projectId) {
+      setIdeaForm((current) => ({ ...current, linkedProjectId: "" }));
+    }
+    setConversionTargets((current) =>
+      Object.fromEntries(Object.entries(current).filter(([, value]) => value !== projectId)),
+    );
+  };
+
   const addTask = (event) => {
     event.preventDefault();
     const title = taskTitle.trim();
@@ -439,6 +475,18 @@ function App() {
     });
   };
 
+  const deleteEvent = (eventId) => {
+    const dailyEvent = data.events.find((item) => item.id === eventId);
+    if (!dailyEvent) return;
+    const confirmed = window.confirm(`确定删除事件「${dailyEvent.title}」吗？`);
+    if (!confirmed) return;
+
+    updateData((current) => ({
+      ...current,
+      events: current.events.filter((item) => item.id !== eventId),
+    }));
+  };
+
   const addCategory = (event) => {
     event.preventDefault();
     const name = categoryForm.name.trim();
@@ -537,7 +585,7 @@ function App() {
       </header>
 
       <section className="privacy-note" aria-label="隐私说明">
-        本系统无需登录，所有复盘数据仅保存在你的浏览器本地，不会上传服务器。清除浏览器数据或更换设备可能导致数据丢失，建议定期导出备份。
+        所有数据仅保存在你的浏览器本地 localStorage，不会上传到服务器；清除浏览器数据或更换设备可能导致数据丢失，建议定期导出 JSON 备份。
       </section>
 
       <section className="status-row" aria-live="polite">
@@ -597,19 +645,31 @@ function App() {
               <p className="empty-text">先创建一个项目，任务和事件就能关联到它。</p>
             ) : (
               data.projects.map((project) => (
-                <button
+                <div
                   className={`project-row ${activeProject?.id === project.id ? "is-active" : ""}`}
                   key={project.id}
-                  type="button"
-                  onClick={() => setActiveProject(project.id)}
                 >
-                  <span className="project-row-title">{project.name}</span>
-                  <span>{project.category}</span>
-                  <span className="progress-track" aria-label={`${project.name} 进度`}>
-                    <span style={{ width: `${project.progress}%` }} />
-                  </span>
-                  <strong>{project.progress}%</strong>
-                </button>
+                  <button
+                    className="project-select-button"
+                    type="button"
+                    onClick={() => setActiveProject(project.id)}
+                  >
+                    <span className="project-row-title">{project.name}</span>
+                    <span>{project.category}</span>
+                    <span className="progress-track" aria-label={`${project.name} 进度`}>
+                      <span style={{ width: `${project.progress}%` }} />
+                    </span>
+                    <strong>{project.progress}%</strong>
+                  </button>
+                  <button
+                    className="icon-button project-delete-button"
+                    type="button"
+                    onClick={() => deleteProject(project.id)}
+                    aria-label={`删除项目 ${project.name}`}
+                  >
+                    <Trash2 size={16} aria-hidden="true" />
+                  </button>
+                </div>
               ))
             )}
           </div>
@@ -764,6 +824,14 @@ function App() {
                       </small>
                     </div>
                     <b>{formatMinutes(event.duration)}</b>
+                    <button
+                      className="icon-button"
+                      type="button"
+                      onClick={() => deleteEvent(event.id)}
+                      aria-label={`删除事件 ${event.title}`}
+                    >
+                      <Trash2 size={16} aria-hidden="true" />
+                    </button>
                   </div>
                 );
               })
