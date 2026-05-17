@@ -23,6 +23,7 @@ import {
 import "./styles.css";
 
 const STORAGE_KEY = "app:review-system:v1";
+const DEEPSEEK_API_KEY = "sk-cfb744f7d7eb4838a812a05a3cd3dca3";
 
 const DEFAULT_CATEGORIES = [
   { id: "cat-academic", name: "学业资产", kind: "asset", type: "growth", isPositive: true, order: 1, color: "#69d2e7" },
@@ -991,7 +992,89 @@ function App() {
   const activeProjectEvents = activeProject
     ? data.events.filter((event) => event.projectId === activeProject.id)
     : [];
-  const quickRecordPresets = [
+
+  // ── DeepSeek AI Parse ──────────────────────────
+  const [aiInput, setAiInput] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState(null);
+
+  const parseWithAI = async () => {
+    const text = aiInput.trim();
+    if (!text) return;
+    setAiLoading(true);
+    setAiResult(null);
+    try {
+      const catNames = data.categories.map((c) => c.name).join("、");
+      const resp = await fetch("https://api.deepseek.com/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${DEEPSEEK_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "deepseek-chat",
+          messages: [
+            {
+              role: "system",
+              content: `你是一个时间记录解析助手。用户会用自然语言描述他今天做了什么。
+请解析出以下信息，以 JSON 数组返回，每个元素代表一条记录：
+[{"title": "具体做了什么", "duration": 分钟数(整数), "category": "分类名"}]
+
+可用的分类：${catNames}
+规则：
+- 如果用户说了时长（如"2小时""30分钟"），准确提取
+- 如果没说时长，根据活动类型合理估算（学习/工作类45分钟，运动类60分钟，休闲类30分钟）
+- 分类选最匹配的可用分类，不要编造新分类
+- 一句话可能包含多个活动，拆成多条记录
+- 只返回 JSON 数组，不要任何其他文字`
+            },
+            { role: "user", content: text }
+          ],
+          temperature: 0.3,
+          max_tokens: 500,
+        }),
+      });
+      const data = await resp.json();
+      const content = data.choices?.[0]?.message?.content || "";
+      // Extract JSON array
+      const match = content.match(/\[[\s\S]*\]/);
+      if (!match) throw new Error("AI 返回格式异常");
+      const parsed = JSON.parse(match[0]);
+      setAiResult(parsed);
+    } catch (err) {
+      console.error("AI parse error:", err);
+      setAiResult([]);
+      showToast("AI 解析失败，请手动填写");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const confirmAIRecords = () => {
+    if (!aiResult || aiResult.length === 0) return;
+    const newEvents = aiResult.map((item) => {
+      const cat = data.categories.find((c) => c.name === item.category)
+        || data.categories.find((c) => c.isPositive)
+        || data.categories[0];
+      return {
+        id: makeId("event"),
+        title: item.title,
+        duration: Math.max(1, Math.round(Number(item.duration) || 30)),
+        category: cat ? cat.name : (data.categories[0]?.name || "学业资产"),
+        projectId: activeProject?.id || (data.projects[0]?.id || null),
+        createdAt: nowIso(),
+      };
+    });
+    updateData((current) => ({
+      ...current,
+      events: [...newEvents, ...current.events],
+    }));
+    setAiInput("");
+    setAiResult(null);
+    showToast(`✅ 已记录 ${newEvents.length} 条`);
+  };
+
+    const quickRecordPresets = [
     { title: "深度学习", duration: "45", category: "学业资产" },
     { title: "训练", duration: "60", category: "身体资产" },
     { title: "英语输入", duration: "30", category: "英语资产" },
@@ -1057,53 +1140,137 @@ function App() {
               </section>
 
               {/* Manual record form */}
+              {/* AI 流水账输入 */}
               <section className="work-card">
                 <div className="panel-title compact">
                   <p className="eyebrow">Record</p>
                   <h3>今天做了什么？</h3>
                 </div>
-                <form className="stack-form compact-form" onSubmit={addEvent}>
-                  <input
-                    data-testid="event-title"
-                    value={eventForm.title}
-                    onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
-                    placeholder="做了什么"
-                    aria-label="事件标题"
+                <div className="ai-input-area">
+                  <textarea
+                    className="ai-textarea"
+                    value={aiInput}
+                    onChange={(e) => setAiInput(e.target.value)}
+                    placeholder="写流水账，AI 帮你记。比如：上午学了2小时 React，下午健身1小时，晚上看了会书"
+                    rows={3}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault();
+                        parseWithAI();
+                      }
+                    }}
                   />
-                  <div className="two-columns">
-                    <input
-                      data-testid="event-duration"
-                      type="number" min="1" step="1"
-                      value={eventForm.duration}
-                      onChange={(e) => setEventForm({ ...eventForm, duration: e.target.value })}
-                      placeholder="分钟"
-                      aria-label="事件时长"
-                    />
-                    <select
-                      value={eventForm.category}
-                      onChange={(e) => setEventForm({ ...eventForm, category: e.target.value })}
-                      aria-label="事件分类"
-                    >
-                      {data.categories.map((cat) => (
-                        <option key={cat.id} value={cat.name}>{cat.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <select
-                    value={eventForm.projectId}
-                    onChange={(e) => setEventForm({ ...eventForm, projectId: e.target.value })}
-                    aria-label="关联项目"
+                  <button
+                    className="ai-parse-btn"
+                    type="button"
+                    onClick={parseWithAI}
+                    disabled={aiLoading || !aiInput.trim()}
                   >
-                    <option value={activeProject?.id || ""}>关联当前项目{activeProject ? "：" + activeProject.name : ""}</option>
-                    <option value="__none__">不关联项目</option>
-                    {data.projects.map((project) => (
-                      <option key={project.id} value={project.id}>{project.name}</option>
-                    ))}
-                  </select>
-                  <button data-testid="add-event" type="submit">
-                    <Plus size={18} aria-hidden="true" />添加记录
+                    {aiLoading ? "解析中..." : "AI 解析"}
                   </button>
-                </form>
+                </div>
+
+                {/* AI result preview */}
+                {aiResult && aiResult.length > 0 && (
+                  <div className="ai-result">
+                    <p className="ai-result-title">解析结果（可修改后确认）</p>
+                    {aiResult.map((item, idx) => (
+                      <div className="ai-result-row" key={idx}>
+                        <input
+                          className="ai-result-input"
+                          value={item.title}
+                          onChange={(e) => {
+                            const next = [...aiResult];
+                            next[idx] = { ...next[idx], title: e.target.value };
+                            setAiResult(next);
+                          }}
+                        />
+                        <input
+                          className="ai-result-dur"
+                          type="number"
+                          min="1"
+                          value={item.duration}
+                          onChange={(e) => {
+                            const next = [...aiResult];
+                            next[idx] = { ...next[idx], duration: e.target.value };
+                            setAiResult(next);
+                          }}
+                        />
+                        <span className="ai-result-unit">分钟</span>
+                        <select
+                          className="ai-result-cat"
+                          value={item.category}
+                          onChange={(e) => {
+                            const next = [...aiResult];
+                            next[idx] = { ...next[idx], category: e.target.value };
+                            setAiResult(next);
+                          }}
+                        >
+                          {data.categories.map((cat) => (
+                            <option key={cat.id} value={cat.name}>{cat.name}</option>
+                          ))}
+                        </select>
+                        <button
+                          className="icon-button"
+                          type="button"
+                          onClick={() => {
+                            setAiResult(aiResult.filter((_, i) => i !== idx));
+                          }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                    <div className="ai-result-actions">
+                      <button className="ai-confirm-btn" type="button" onClick={confirmAIRecords}>
+                        <Check size={16} />确认记录 {aiResult.length} 条
+                      </button>
+                      <button className="ghost-button" type="button" onClick={() => setAiResult(null)}>
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {aiResult && aiResult.length === 0 && (
+                  <p className="empty-text" style={{ marginTop: 8 }}>AI 未能解析出有效记录，请尝试用更具体的描述。</p>
+                )}
+
+                {/* 手动记录（折叠） */}
+                <details className="manual-record-toggle">
+                  <summary>或手动填写</summary>
+                  <form className="stack-form compact-form" onSubmit={addEvent} style={{ marginTop: 8 }}>
+                    <input
+                      data-testid="event-title"
+                      value={eventForm.title}
+                      onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
+                      placeholder="做了什么"
+                      aria-label="事件标题"
+                    />
+                    <div className="two-columns">
+                      <input
+                        data-testid="event-duration"
+                        type="number" min="1" step="1"
+                        value={eventForm.duration}
+                        onChange={(e) => setEventForm({ ...eventForm, duration: e.target.value })}
+                        placeholder="分钟"
+                        aria-label="事件时长"
+                      />
+                      <select
+                        value={eventForm.category}
+                        onChange={(e) => setEventForm({ ...eventForm, category: e.target.value })}
+                        aria-label="事件分类"
+                      >
+                        {data.categories.map((cat) => (
+                          <option key={cat.id} value={cat.name}>{cat.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <button data-testid="add-event" type="submit">
+                      <Plus size={18} aria-hidden="true" />添加记录
+                    </button>
+                  </form>
+                </details>
               </section>
 
               {/* Today's records list */}
