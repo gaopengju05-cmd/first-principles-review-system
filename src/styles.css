@@ -861,6 +861,31 @@ button:disabled {
   padding: 0 10px;
 }
 
+
+.cta-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border: 1px solid var(--blue);
+  border-radius: var(--radius);
+  background: rgba(127, 144, 255, 0.12);
+  color: var(--blue-strong);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.cta-button:hover {
+  background: rgba(127, 144, 255, 0.22);
+}
+
+.empty-state-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+}
 @media (max-width: 1100px) {
   .dashboard-grid {
     grid-template-columns: 280px minmax(0, 1fr);

@@ -102,7 +102,7 @@ const projectProgressFromTasks = (projectId, tasks) => {
   return Math.round((completed / projectTasks.length) * 100);
 };
 
-const normalizeData = (raw) => {
+const normalizeData = (raw, options = {}) => {
   const defaults = createDefaultData();
   if (!raw || typeof raw !== "object") return defaults;
 
@@ -191,7 +191,7 @@ const normalizeData = (raw) => {
       ...defaults.settings,
       ...(raw.settings || {}),
       activeProjectId,
-      lastOpenDate: localDateKey(),
+      lastOpenDate: options.keepLastOpenDate ? (raw.settings && raw.settings.lastOpenDate ? raw.settings.lastOpenDate : localDateKey()) : localDateKey(),
     },
   };
 };
@@ -401,6 +401,8 @@ function App() {
   const [scheduleGenerated, setScheduleGenerated] = useState(() => false);
 
   const reviewRef = useRef(null);
+  const projectFormRef = useRef(null);
+  const taskInputRef = useRef(null);
 
   useEffect(() => {
     const normalized = normalizeData(data);
@@ -452,14 +454,7 @@ function App() {
   const updateData = (updater) => {
     setData((current) => {
       const next = typeof updater === "function" ? updater(current) : updater;
-      const normalized = normalizeData(next);
-      return {
-        ...normalized,
-        projects: normalized.projects.map((project) => ({
-          ...project,
-          progress: projectProgressFromTasks(project.id, normalized.tasks),
-        })),
-      };
+      return normalizeData(next, { keepLastOpenDate: true });
     });
   };
 
@@ -855,7 +850,7 @@ function App() {
             </div>
           </section>
 
-          <form className="stack-form compact-form new-project-form" onSubmit={addProject}>
+          <form className="stack-form compact-form new-project-form" onSubmit={addProject} ref={projectFormRef}>
             <div className="panel-title compact">
               <p className="eyebrow">Create</p>
               <h3>新建项目</h3>
@@ -902,7 +897,25 @@ function App() {
             <div>
               <p className="eyebrow">Current Focus</p>
               <h2>{activeProject ? activeProject.name : "选择一个长期资产"}</h2>
-              <p>{activeProject?.description || "建立项目后，这里会变成今天的执行中心。"}</p>
+              {activeProject ? (
+                <p>{activeProject.description || "建立项目后，这里会变成今天的执行中心。"}</p>
+              ) : (
+                <div style={{ marginTop: '12px' }}>
+                  <p>先创建你的第一个资产项目，然后就能添加子任务、记录时间投入。</p>
+                  <button
+                    type="button"
+                    className="cta-button"
+                    onClick={() => {
+                      projectFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      projectFormRef.current?.querySelector('input')?.focus();
+                    }}
+                    style={{ marginTop: '8px' }}
+                  >
+                    <Plus size={18} aria-hidden="true" />
+                    立即创建项目
+                  </button>
+                </div>
+              )}
             </div>
             <div className="focus-score" style={{ "--tone": activeCategory.color }}>
               <span>{activeProject ? activeProject.category : "未开始"}</span>
@@ -928,6 +941,7 @@ function App() {
               </div>
               <form className="inline-form" onSubmit={addTask}>
                 <input
+                  ref={taskInputRef}
                   data-testid="task-title"
                   value={taskTitle}
                   onChange={(event) => setTaskTitle(event.target.value)}
@@ -941,7 +955,20 @@ function App() {
               </form>
               <div className="task-list" aria-label="子任务列表">
                 {!activeProject ? (
-                  <p className="empty-text">先在左侧创建或选择一个项目。</p>
+                  <div className="empty-state-action">
+                    <p className="empty-text">需要一个项目来承载任务。</p>
+                    <button
+                      type="button"
+                      className="cta-button"
+                      onClick={() => {
+                        projectFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        projectFormRef.current?.querySelector('input')?.focus();
+                      }}
+                    >
+                      <Plus size={16} aria-hidden="true" />
+                      创建项目
+                    </button>
+                  </div>
                 ) : activeProjectTasks.length === 0 ? (
                   <p className="empty-text">暂无任务。写下一个今天可以完成的小动作。</p>
                 ) : (
