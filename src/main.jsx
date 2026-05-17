@@ -450,9 +450,27 @@ const InlineCategoryEditor = ({ category, onSave, onDelete, canDelete }) => {
   );
 };
 
+const getPageFromURL = () => {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("page") === "assets" ? "assets" : "record";
+};
+
 function App() {
+  const [page, setPage] = useState(getPageFromURL);
   const [data, setData] = useState(loadReviewData);
   const [storageMessage, setStorageMessage] = useState("");
+
+  // Sync URL when page changes
+  const navigateTo = (p) => {
+    setPage(p);
+    const url = new URL(window.location);
+    if (p === "assets") {
+      url.searchParams.set("page", "assets");
+    } else {
+      url.searchParams.delete("page");
+    }
+    window.history.pushState({}, "", url);
+  };
   const [projectForm, setProjectForm] = useState({
     name: "",
     description: "",
@@ -923,6 +941,23 @@ function App() {
 
   return (
     <main className="review-os">
+      {/* Tab bar */}
+      <nav className="tab-bar">
+        <button
+          className={`tab-btn ${page === "record" ? "is-active" : ""}`}
+          type="button"
+          onClick={() => navigateTo("record")}
+        >
+          记录
+        </button>
+        <button
+          className={`tab-btn ${page === "assets" ? "is-active" : ""}`}
+          type="button"
+          onClick={() => navigateTo("assets")}
+        >
+          资产
+        </button>
+      </nav>
       <section className="system-status" aria-live="polite">
         <span>
           <ShieldCheck size={15} aria-hidden="true" />
@@ -932,6 +967,9 @@ function App() {
         {importError ? <strong>{importError}</strong> : null}
       </section>
 
+      
+      {page === "record" && (
+      <>
       {/* Hero: compact toolbar */}
       <section className="hero-panel">
         <div className="hero-bar">
@@ -964,7 +1002,7 @@ function App() {
       </section>
 
       <div className="dashboard-grid" id="workspace">
-        <aside className="sidebar-panel">
+        <aside className="sidebar-panel record-sidebar">
           <div className="sidebar-brand">
             <div className="brand-mark">
               <span />
@@ -974,113 +1012,44 @@ function App() {
           </div>
 
           <nav className="side-nav" aria-label="工作台导航">
-            <a href="#project-workbench">当前项目</a>
             <a href="#task-list">子任务</a>
             <a href="#idea-pool">想法池</a>
             <a href="#today-review">今日复盘</a>
-            <a href="#system-tools">系统备份</a>
           </nav>
 
-          <section className="sidebar-section" aria-label="资产分类">
-            <div className="panel-title compact category-panel-header">
+          {/* Quick project switcher */}
+          <section className="sidebar-section">
+            <div className="panel-title compact" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
-                <p className="eyebrow">Categories</p>
-                <h3>资产分类</h3>
+                <p className="eyebrow">Focus</p>
+                <h3>当前项目</h3>
               </div>
               <button
-                className={`icon-button ${categoryEditMode ? "is-active" : ""}`}
+                className="icon-button"
                 type="button"
-                onClick={() => setCategoryEditMode((prev) => !prev)}
-                aria-label="管理分类"
-                title="管理分类"
+                onClick={() => navigateTo("assets")}
+                title="管理项目与分类"
+                style={{ width: "28px", height: "28px", minHeight: "28px", flex: "0 0 28px" }}
               >
-                <Settings size={16} aria-hidden="true" />
+                <Settings size={14} aria-hidden="true" />
               </button>
             </div>
-
-            {/* Filter mode */}
-            {!categoryEditMode && (
-              <div className="filter-list">
+            {data.projects.length === 0 ? (
+              <div style={{ padding: "8px 0" }}>
+                <p className="empty-text">还没有项目</p>
                 <button
-                  className={activeCategoryFilter === "all" ? "is-active" : ""}
+                  className="cta-button"
                   type="button"
-                  onClick={() => setActiveCategoryFilter("all")}
+                  onClick={() => navigateTo("assets")}
+                  style={{ marginTop: "8px", width: "100%", justifyContent: "center", fontSize: "0.8rem", padding: "8px 12px" }}
                 >
-                  全部项目
+                  <Plus size={14} aria-hidden="true" />
+                  去创建项目
                 </button>
-                {data.categories.map((category) => (
-                  <button
-                    className={activeCategoryFilter === category.name ? "is-active" : ""}
-                    type="button"
-                    key={category.id}
-                    onClick={() => setActiveCategoryFilter(category.name)}
-                  >
-                    <i style={{ "--tone": category.color }} />
-                    {category.name}
-                    {!category.isPositive && <span className="cat-tag">消耗</span>}
-                    {category.isPositive && <span className="cat-tag positive">资产</span>}
-                  </button>
-                ))}
               </div>
-            )}
-
-            {/* Edit mode */}
-            {categoryEditMode && (
-              <div className="category-edit-list">
-                {data.categories.map((category, idx) => (
-                  <div className="category-edit-row" key={category.id}>
-                    <span className="cat-grip" title="拖拽排序">
-                      <GripVertical size={14} aria-hidden="true" />
-                    </span>
-                    <InlineCategoryEditor
-                      category={category}
-                      onSave={(updates) => updateCategory(category.id, updates)}
-                      onDelete={() => deleteCategory(category.id)}
-                      canDelete={data.categories.length > 1}
-                    />
-                  </div>
-                ))}
-                {/* Quick add in edit mode */}
-                <form
-                  className="category-add-inline"
-                  onSubmit={(e) => { e.preventDefault(); addCategory(e); }}
-                >
-                  <input
-                    value={categoryForm.name}
-                    onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })}
-                    placeholder="新分类名称"
-                    aria-label="新分类名称"
-                    className="cat-add-input"
-                  />
-                  <select
-                    value={categoryForm.kind}
-                    onChange={(e) => setCategoryForm({ ...categoryForm, kind: e.target.value, isPositive: e.target.value !== "drain", type: e.target.value === "drain" ? "consumption" : "growth" })}
-                    className="cat-add-select"
-                  >
-                    <option value="asset">正向资产</option>
-                    <option value="maintenance">生存任务</option>
-                    <option value="drain">注意力消耗</option>
-                  </select>
-                  <button type="submit" className="icon-button" title="添加分类">
-                    <Plus size={14} aria-hidden="true" />
-                  </button>
-                </form>
-              </div>
-            )}
-          </section>
-
-          <section className="sidebar-section">
-            <div className="panel-title compact">
-              <p className="eyebrow">Projects</p>
-              <h3>项目列表</h3>
-            </div>
-            <div className="project-list" aria-label="项目列表">
-              {data.projects.length === 0 ? (
-                <p className="empty-text">先创建一个资产项目。任务、事件和想法都会围绕它沉淀。</p>
-              ) : filteredProjects.length === 0 ? (
-                <p className="empty-text">这个分类下还没有项目。</p>
-              ) : (
-                filteredProjects.map((project) => (
+            ) : (
+              <div className="project-list">
+                {data.projects.map((project) => (
                   <div
                     className={`project-row ${activeProject?.id === project.id ? "is-active" : ""}`}
                     key={project.id}
@@ -1091,66 +1060,16 @@ function App() {
                       onClick={() => setActiveProject(project.id)}
                     >
                       <span className="project-row-title">{project.name}</span>
-                      <span>{project.category}</span>
                       <span className="progress-track" aria-label={`${project.name} 进度`}>
                         <span style={{ width: `${project.progress}%` }} />
                       </span>
                       <strong>{project.progress}%</strong>
                     </button>
-                    <button
-                      className="icon-button"
-                      type="button"
-                      onClick={() => deleteProject(project.id)}
-                      aria-label={`删除项目 ${project.name}`}
-                    >
-                      <Trash2 size={16} aria-hidden="true" />
-                    </button>
                   </div>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            )}
           </section>
-
-          <form className="stack-form compact-form new-project-form secondary-form" onSubmit={addProject} ref={projectFormRef}>
-            <div className="panel-title compact">
-              <p className="eyebrow">Project</p>
-              <h3>+ 新建项目</h3>
-            </div>
-            <input
-              data-testid="project-name"
-              value={projectForm.name}
-              onChange={(event) => setProjectForm({ ...projectForm, name: event.target.value })}
-              placeholder="新项目名称"
-              aria-label="新项目名称"
-            />
-            <textarea
-              data-testid="project-description"
-              value={projectForm.description}
-              onChange={(event) =>
-                setProjectForm({ ...projectForm, description: event.target.value })
-              }
-              placeholder="一句话描述这个资产"
-              aria-label="项目描述"
-              rows={3}
-            />
-            <select
-              value={projectForm.category}
-              onChange={(event) =>
-                setProjectForm({ ...projectForm, category: event.target.value })
-              }
-              aria-label="项目分类"
-            >
-              {data.categories.map((category) => (
-                <option key={category.id} value={category.name}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
-            <button data-testid="add-project" type="submit">
-              <Plus size={18} aria-hidden="true" />
-              新建资产
-            </button>
-          </form>
         </aside>
 
         <section className="main-panel" id="project-workbench">
@@ -1668,66 +1587,6 @@ function App() {
             )}
           </section>
 
-          <section className="system-panel" id="system-tools">
-            <div className="panel-title compact">
-              <p className="eyebrow">System</p>
-              <h2>分类与备份</h2>
-            </div>
-            <form className="category-form" onSubmit={addCategory}>
-              <input
-                data-testid="category-name"
-                value={categoryForm.name}
-                onChange={(event) => setCategoryForm({ ...categoryForm, name: event.target.value })}
-                placeholder="新增自定义分类"
-                aria-label="新增自定义分类"
-              />
-              <select
-                value={categoryForm.kind}
-                onChange={(event) => setCategoryForm({ ...categoryForm, kind: event.target.value })}
-                aria-label="分类类型"
-              >
-                <option value="asset">高价值资产</option>
-                <option value="maintenance">生存任务</option>
-                <option value="drain">注意力消耗</option>
-              </select>
-              <button data-testid="add-category" type="submit">
-                <Plus size={18} aria-hidden="true" />
-                新增分类
-              </button>
-            </form>
-            <div className="category-list">
-              {data.categories.map((category) => (
-                <span
-                  className="category-chip"
-                  key={category.id}
-                  style={{ "--tone": category.color }}
-                >
-                  <i />
-                  {category.name}
-                </span>
-              ))}
-            </div>
-            <div className="backup-row">
-              <span>
-                <CalendarDays size={16} aria-hidden="true" />
-                数据只在本机浏览器，不会上云。
-              </span>
-              <div className="backup-actions">
-                <button className="ghost-button" type="button" onClick={exportJson}>
-                  <FileDown size={18} aria-hidden="true" />
-                  导出 JSON
-                </button>
-                <label className="ghost-button file-button">
-                  <FileUp size={18} aria-hidden="true" />
-                  导入
-                  <input type="file" accept="application/json" onChange={importJson} />
-                </label>
-                <button className="ghost-button" type="button" onClick={resetBrokenStorage}>
-                  重置本地数据
-                </button>
-              </div>
-            </div>
-          </section>
         </aside>
       </div>
     {toast && (
@@ -1740,7 +1599,264 @@ function App() {
           )}
         </div>
       )}
-    </main>
+    
+      {/* ═══════════ Assets Page ═══════════ */}
+      {page === "assets" && (
+        <div className="assets-page">
+          {/* Left column: categories + projects */}
+          <aside className="assets-sidebar">
+            {/* Category editor */}
+            <section className="assets-section">
+              <div className="panel-title compact category-panel-header">
+                <div>
+                  <p className="eyebrow">Categories</p>
+                  <h3>资产分类</h3>
+                </div>
+                <button
+                  className={`icon-button ${categoryEditMode ? "is-active" : ""}`}
+                  type="button"
+                  onClick={() => setCategoryEditMode((prev) => !prev)}
+                  aria-label="管理分类"
+                  title="管理分类"
+                >
+                  <Settings size={16} aria-hidden="true" />
+                </button>
+              </div>
+
+              {!categoryEditMode && (
+                <div className="filter-list">
+                  <button
+                    className={activeCategoryFilter === "all" ? "is-active" : ""}
+                    type="button"
+                    onClick={() => setActiveCategoryFilter("all")}
+                  >
+                    全部项目
+                  </button>
+                  {data.categories.map((category) => (
+                    <button
+                      className={activeCategoryFilter === category.name ? "is-active" : ""}
+                      type="button"
+                      key={category.id}
+                      onClick={() => setActiveCategoryFilter(category.name)}
+                    >
+                      <i style={{ "--tone": category.color }} />
+                      {category.name}
+                      {!category.isPositive && <span className="cat-tag">消耗</span>}
+                      {category.isPositive && <span className="cat-tag positive">资产</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {categoryEditMode && (
+                <div className="category-edit-list">
+                  {data.categories.map((category, idx) => (
+                    <div className="category-edit-row" key={category.id}>
+                      <span className="cat-grip" title="拖拽排序">
+                        <GripVertical size={14} aria-hidden="true" />
+                      </span>
+                      <InlineCategoryEditor
+                        category={category}
+                        onSave={(updates) => updateCategory(category.id, updates)}
+                        onDelete={() => deleteCategory(category.id)}
+                        canDelete={data.categories.length > 1}
+                      />
+                    </div>
+                  ))}
+                  <form
+                    className="category-add-inline"
+                    onSubmit={(e) => { e.preventDefault(); addCategory(e); }}
+                  >
+                    <input
+                      value={categoryForm.name}
+                      onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })}
+                      placeholder="新分类名称"
+                      aria-label="新分类名称"
+                      className="cat-add-input"
+                    />
+                    <select
+                      value={categoryForm.kind}
+                      onChange={(e) => setCategoryForm({ ...categoryForm, kind: e.target.value })}
+                      className="cat-add-select"
+                    >
+                      <option value="asset">正向资产</option>
+                      <option value="maintenance">生存任务</option>
+                      <option value="drain">注意力消耗</option>
+                    </select>
+                    <button type="submit" className="icon-button" title="添加分类">
+                      <Plus size={14} aria-hidden="true" />
+                    </button>
+                  </form>
+                </div>
+              )}
+            </section>
+
+            {/* Project list */}
+            <section className="assets-section">
+              <div className="panel-title compact">
+                <p className="eyebrow">Projects</p>
+                <h3>项目列表</h3>
+              </div>
+              <div className="project-list" aria-label="项目列表">
+                {data.projects.length === 0 ? (
+                  <p className="empty-text">还没有项目。在下方创建第一个资产项目。</p>
+                ) : filteredProjects.length === 0 ? (
+                  <p className="empty-text">这个分类下还没有项目。</p>
+                ) : (
+                  filteredProjects.map((project) => (
+                    <div
+                      className={`project-row ${activeProject?.id === project.id ? "is-active" : ""}`}
+                      key={project.id}
+                    >
+                      <button
+                        className="project-select-button"
+                        type="button"
+                        onClick={() => setActiveProject(project.id)}
+                      >
+                        <span className="project-row-title">{project.name}</span>
+                        <span>{project.category}</span>
+                        <span className="progress-track" aria-label={`${project.name} 进度`}>
+                          <span style={{ width: `${project.progress}%` }} />
+                        </span>
+                        <strong>{project.progress}%</strong>
+                      </button>
+                      <button
+                        className="icon-button"
+                        type="button"
+                        onClick={() => deleteProject(project.id)}
+                        aria-label={`删除项目 ${project.name}`}
+                      >
+                        <Trash2 size={16} aria-hidden="true" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+
+            {/* New project form */}
+            <form className="stack-form compact-form" onSubmit={addProject} ref={projectFormRef}>
+              <div className="panel-title compact">
+                <p className="eyebrow">Create</p>
+                <h3>+ 新建项目</h3>
+              </div>
+              <input
+                data-testid="project-name"
+                value={projectForm.name}
+                onChange={(event) => setProjectForm({ ...projectForm, name: event.target.value })}
+                placeholder="新项目名称"
+                aria-label="新项目名称"
+              />
+              <textarea
+                data-testid="project-description"
+                value={projectForm.description}
+                onChange={(event) =>
+                  setProjectForm({ ...projectForm, description: event.target.value })
+                }
+                placeholder="一句话描述这个资产"
+                aria-label="项目描述"
+                rows={3}
+              />
+              <select
+                value={projectForm.category}
+                onChange={(event) =>
+                  setProjectForm({ ...projectForm, category: event.target.value })
+                }
+                aria-label="项目分类"
+              >
+                {data.categories.map((category) => (
+                  <option key={category.id} value={category.name}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+              <button data-testid="add-project" type="submit">
+                <Plus size={18} aria-hidden="true" />
+                新建资产
+              </button>
+            </form>
+          </aside>
+
+          {/* Right column: backup + system */}
+          <div className="assets-main">
+            <section className="assets-section system-section">
+              <div className="panel-title compact">
+                <p className="eyebrow">System</p>
+                <h2>数据备份</h2>
+              </div>
+              <p style={{ fontSize: "0.82rem", color: "var(--text-soft)", marginBottom: "12px" }}>
+                数据只保存在本机浏览器，不会上传到任何服务器。建议定期导出备份。
+              </p>
+              <div className="backup-row" style={{ flexDirection: "column", alignItems: "flex-start", gap: "8px" }}>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  <button className="ghost-button" type="button" onClick={exportJson}>
+                    <FileDown size={16} aria-hidden="true" />
+                    导出 JSON
+                  </button>
+                  <label className="ghost-button file-button">
+                    <FileUp size={16} aria-hidden="true" />
+                    导入
+                    <input type="file" accept="application/json" onChange={importJson} />
+                  </label>
+                </div>
+                <button className="ghost-button danger-button" type="button" onClick={resetBrokenStorage}>
+                  重置本地数据
+                </button>
+              </div>
+              {importError ? <p style={{ color: "var(--danger)", fontSize: "0.8rem", marginTop: "8px" }}>{importError}</p> : null}
+            </section>
+
+            {/* Category chips overview */}
+            <section className="assets-section">
+              <div className="panel-title compact">
+                <p className="eyebrow">Overview</p>
+                <h3>当前分类</h3>
+              </div>
+              <div className="category-list">
+                {data.categories.map((category) => (
+                  <span
+                    className="category-chip"
+                    key={category.id}
+                    style={{ "--tone": category.color }}
+                  >
+                    <i />
+                    {category.name}
+                  </span>
+                ))}
+              </div>
+            </section>
+
+            {/* Quick stats */}
+            <section className="assets-section">
+              <div className="panel-title compact">
+                <p className="eyebrow">Stats</p>
+                <h3>项目总览</h3>
+              </div>
+              <div className="metric-grid">
+                <div>
+                  <Target size={18} aria-hidden="true" />
+                  <span>项目数</span>
+                  <strong>{data.projects.length}</strong>
+                </div>
+                <div>
+                  <BarChart3 size={18} aria-hidden="true" />
+                  <span>总任务</span>
+                  <strong>{data.tasks.length}</strong>
+                </div>
+                <div>
+                  <Lightbulb size={18} aria-hidden="true" />
+                  <span>想法</span>
+                  <strong>{data.ideas.length}</strong>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      )}
+
+      </>
+      )}
+</main>
   );
 }
 
