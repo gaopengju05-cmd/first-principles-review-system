@@ -7,28 +7,32 @@ import {
   Check,
   CircleDot,
   Download,
+  Edit3,
   FileDown,
   FileUp,
+  GripVertical,
   Lightbulb,
   Plus,
   RefreshCw,
+  Settings,
   ShieldCheck,
   Target,
   Trash2,
+  X,
 } from "lucide-react";
 import "./styles.css";
 
 const STORAGE_KEY = "app:review-system:v1";
 
-const PRESET_CATEGORIES = [
-  { id: "cat-academic", name: "学业资产", kind: "asset", isPreset: true, color: "#69d2e7" },
-  { id: "cat-english", name: "英语资产", kind: "asset", isPreset: true, color: "#a7db57" },
-  { id: "cat-body", name: "身体资产", kind: "asset", isPreset: true, color: "#f6d365" },
-  { id: "cat-output", name: "输出资产", kind: "asset", isPreset: true, color: "#fda085" },
-  { id: "cat-survival", name: "生存任务", kind: "maintenance", isPreset: true, color: "#b8c0ff" },
-  { id: "cat-attention", name: "注意力消耗", kind: "drain", isPreset: true, color: "#ff8fab" },
-  { id: "cat-relation", name: "关系资产", kind: "asset", isPreset: true, color: "#8ecae6" },
-  { id: "cat-finance", name: "财务资产", kind: "asset", isPreset: true, color: "#80ed99" },
+const DEFAULT_CATEGORIES = [
+  { id: "cat-academic", name: "学业资产", kind: "asset", type: "growth", isPositive: true, order: 1, color: "#69d2e7" },
+  { id: "cat-english", name: "英语资产", kind: "asset", type: "compound", isPositive: true, order: 2, color: "#a7db57" },
+  { id: "cat-body", name: "身体资产", kind: "asset", type: "compound", isPositive: true, order: 3, color: "#f6d365" },
+  { id: "cat-output", name: "输出资产", kind: "asset", type: "leverage", isPositive: true, order: 4, color: "#fda085" },
+  { id: "cat-survival", name: "生存任务", kind: "maintenance", type: "survival", isPositive: false, order: 5, color: "#b8c0ff" },
+  { id: "cat-attention", name: "注意力消耗", kind: "drain", type: "consumption", isPositive: false, order: 6, color: "#ff8fab" },
+  { id: "cat-relation", name: "关系资产", kind: "asset", type: "compound", isPositive: true, order: 7, color: "#8ecae6" },
+  { id: "cat-finance", name: "财务资产", kind: "asset", type: "growth", isPositive: true, order: 8, color: "#80ed99" },
 ];
 
 const makeId = (prefix) => {
@@ -66,7 +70,7 @@ const createDefaultData = () => ({
   tasks: [],
   ideas: [],
   events: [],
-  categories: PRESET_CATEGORIES,
+  categories: DEFAULT_CATEGORIES,
   reviews: [],
   schedules: [],
   settings: {
@@ -78,21 +82,22 @@ const createDefaultData = () => ({
 
 const ensureArray = (value) => (Array.isArray(value) ? value : []);
 
-const mergeCategories = (categories) => {
-  const incoming = ensureArray(categories);
-  const custom = incoming.filter((category) => category && !category.isPreset);
-  const presetByName = new Set(PRESET_CATEGORIES.map((category) => category.name));
-  const cleanedCustom = custom
-    .filter((category) => category.name && !presetByName.has(category.name))
-    .map((category) => ({
-      id: category.id || makeId("cat"),
-      name: String(category.name),
-      kind: ["asset", "maintenance", "drain"].includes(category.kind) ? category.kind : "asset",
-      isPreset: false,
-      color: category.color || "#c4b5fd",
-    }));
+const normalizeCategory = (cat) => ({
+  id: cat.id || makeId("cat"),
+  name: String(cat.name || "未命名"),
+  kind: ["asset", "maintenance", "drain"].includes(cat.kind) ? cat.kind : "asset",
+  type: ["survival", "growth", "leverage", "compound", "consumption"].includes(cat.type) ? cat.type : "growth",
+  isPositive: typeof cat.isPositive === "boolean" ? cat.isPositive : (cat.kind !== "drain"),
+  order: typeof cat.order === "number" ? cat.order : 99,
+  color: cat.color || "#c4b5fd",
+});
 
-  return [...PRESET_CATEGORIES, ...cleanedCustom];
+const mergeCategories = (rawCategories) => {
+  const incoming = ensureArray(rawCategories);
+  if (incoming.length === 0) return DEFAULT_CATEGORIES.map(normalizeCategory);
+  const merged = incoming.map(normalizeCategory);
+  merged.sort((a, b) => a.order - b.order);
+  return merged;
 };
 
 const projectProgressFromTasks = (projectId, tasks) => {
@@ -227,7 +232,7 @@ const formatMinutes = (minutes) => {
 };
 
 const getCategory = (categories, name) =>
-  categories.find((category) => category.name === name) || PRESET_CATEGORIES[0];
+  categories.find((category) => category.name === name) || categories[0] || DEFAULT_CATEGORIES[0];
 
 const buildReview = ({ data, todayEvents, todayIdeas, todayCompletedTasks, todayKey }) => {
   const categoryMap = new Map(data.categories.map((category) => [category.name, category]));
@@ -378,23 +383,90 @@ const generateDailySchedule = (data) => {
   };
 };
 
+
+// ─── Inline Category Editor ───────────────────────
+const InlineCategoryEditor = ({ category, onSave, onDelete, canDelete }) => {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(category.name);
+  const [kind, setKind] = useState(category.kind);
+  const [color, setColor] = useState(category.color);
+
+  const handleSave = () => {
+    onSave({ name: name.trim() || category.name, kind, color });
+    setEditing(false);
+  };
+
+  const handleCancel = () => {
+    setName(category.name);
+    setKind(category.kind);
+    setColor(category.color);
+    setEditing(false);
+  };
+
+  if (!editing) {
+    return (
+      <div className="cat-edit-content">
+        <span className="cat-color-dot" style={{ background: category.color }} />
+        <span className="cat-edit-name">{category.name}</span>
+        <span className="cat-edit-kind">{category.kind === "asset" ? "资产" : category.kind === "drain" ? "消耗" : "生存"}</span>
+        <button className="icon-button cat-action" type="button" onClick={() => setEditing(true)} title="编辑">
+          <Edit3 size={12} aria-hidden="true" />
+        </button>
+        <button className="icon-button cat-action" type="button" onClick={onDelete} title="删除" disabled={!canDelete}>
+          <Trash2 size={12} aria-hidden="true" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="cat-edit-content editing">
+      <input
+        className="cat-edit-input"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        autoFocus
+        onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") handleCancel(); }}
+      />
+      <select className="cat-edit-select" value={kind} onChange={(e) => setKind(e.target.value)}>
+        <option value="asset">正向资产</option>
+        <option value="maintenance">生存任务</option>
+        <option value="drain">注意力消耗</option>
+      </select>
+      <input
+        className="cat-color-picker"
+        type="color"
+        value={color}
+        onChange={(e) => setColor(e.target.value)}
+        title="选择颜色"
+      />
+      <button className="icon-button cat-action" type="button" onClick={handleSave} title="保存">
+        <Check size={12} aria-hidden="true" />
+      </button>
+      <button className="icon-button cat-action" type="button" onClick={handleCancel} title="取消">
+        <X size={12} aria-hidden="true" />
+      </button>
+    </div>
+  );
+};
+
 function App() {
   const [data, setData] = useState(loadReviewData);
   const [storageMessage, setStorageMessage] = useState("");
   const [projectForm, setProjectForm] = useState({
     name: "",
     description: "",
-    category: PRESET_CATEGORIES[0].name,
+    category: DEFAULT_CATEGORIES[0].name,
   });
   const [taskTitle, setTaskTitle] = useState("");
   const [ideaForm, setIdeaForm] = useState({ content: "", linkedProjectId: "" });
   const [eventForm, setEventForm] = useState({
     title: "",
     duration: "",
-    category: PRESET_CATEGORIES[0].name,
+    category: DEFAULT_CATEGORIES[0].name,
     projectId: "",
   });
-  const [categoryForm, setCategoryForm] = useState({ name: "", kind: "asset" });
+  const [categoryForm, setCategoryForm] = useState({ name: "", kind: "asset", type: "growth", color: "#c4b5fd" });
   const [activeCategoryFilter, setActiveCategoryFilter] = useState("all");
   const [conversionTargets, setConversionTargets] = useState({});
   const [importError, setImportError] = useState("");
@@ -403,6 +475,7 @@ function App() {
     const today = localDateKey();
     return raw.schedules.find((s) => s.date === today) || null;
   });
+  const [categoryEditMode, setCategoryEditMode] = useState(false);
   const [scheduleGenerated, setScheduleGenerated] = useState(() => {
     const raw = loadReviewData();
     const today = localDateKey();
@@ -676,15 +749,43 @@ function App() {
     event.preventDefault();
     const name = categoryForm.name.trim();
     if (!name || data.categories.some((category) => category.name === name)) return;
-    const category = {
+    const maxOrder = Math.max(0, ...data.categories.map((c) => c.order));
+    const category = normalizeCategory({
       id: makeId("cat"),
       name,
       kind: categoryForm.kind,
-      isPreset: false,
-      color: "#c4b5fd",
-    };
+      type: categoryForm.type || "growth",
+      isPositive: categoryForm.kind !== "drain",
+      order: maxOrder + 1,
+      color: categoryForm.color || "#c4b5fd",
+    });
     updateData((current) => ({ ...current, categories: [...current.categories, category] }));
-    setCategoryForm({ name: "", kind: categoryForm.kind });
+    setCategoryForm({ name: "", kind: "asset", type: "growth", color: "#c4b5fd" });
+  };
+
+  const updateCategory = (catId, updates) => {
+    updateData((current) => ({
+      ...current,
+      categories: current.categories.map((c) =>
+        c.id === catId ? normalizeCategory({ ...c, ...updates }) : c
+      ),
+    }));
+  };
+
+  const deleteCategory = (catId) => {
+    if (data.categories.length <= 1) {
+      showToast("⚠️ 至少保留一个分类");
+      return;
+    }
+    const cat = data.categories.find((c) => c.id === catId);
+    if (!cat) return;
+    const confirmed = window.confirm(`确定删除分类「${cat.name}」吗？`);
+    if (!confirmed) return;
+    updateData((current) => ({
+      ...current,
+      categories: current.categories.filter((c) => c.id !== catId),
+    }));
+    showToast(`已删除「${cat.name}」`);
   };
 
   const saveTodayReview = () => {
@@ -705,17 +806,16 @@ function App() {
     }, 5000);
   };
 
-  const quickRecord = (preset) => {
-    if (!activeProject) {
-      showToast('⚠️ 请先选择或创建一个项目');
-      return;
-    }
+  const quickRecord = (preset, fallbackCategory) => {
+    const cat = fallbackCategory || data.categories.find((c) => c.name === preset.category)
+      || data.categories.find((c) => c.isPositive)
+      || data.categories[0];
     const ev = {
       id: makeId('event'),
       title: preset.title,
       duration: Number(preset.duration),
-      category: preset.category,
-      projectId: activeProject.id,
+      category: cat ? cat.name : preset.category,
+      projectId: activeProject?.id || (data.projects[0]?.id || null),
       createdAt: nowIso(),
     };
     updateData((current) => ({ ...current, events: [ev, ...current.events] }));
@@ -800,7 +900,7 @@ function App() {
   const openIdeaCount = data.ideas.filter((idea) => idea.status !== "converted").length;
   const activeCategory = activeProject
     ? getCategory(data.categories, activeProject.category)
-    : PRESET_CATEGORIES[0];
+    : data.categories[0] || DEFAULT_CATEGORIES[0];
   const topCategory = stats.byCategory[0];
   const filteredProjects =
     activeCategoryFilter === "all"
@@ -815,6 +915,12 @@ function App() {
     { title: "英语输入", duration: "30", category: "英语资产" },
   ];
 
+  const heroQuickRecords = [
+    { title: "学习", duration: "45", category: "学业资产" },
+    { title: "训练", duration: "60", category: "身体资产" },
+    { title: "英语", duration: "30", category: "英语资产" },
+  ];
+
   return (
     <main className="review-os">
       <section className="system-status" aria-live="polite">
@@ -824,6 +930,41 @@ function App() {
         </span>
         <span>localStorage: {STORAGE_KEY}</span>
         {importError ? <strong>{importError}</strong> : null}
+      </section>
+
+      {/* Hero: 快速记录今天 */}
+      <section className="hero-panel">
+        <div className="hero-copy">
+          <h1>快速记录今天</h1>
+          <p>先记录，再复盘。30 秒看清你今天把时间投给了什么。</p>
+        </div>
+        <div className="hero-actions">
+          {heroQuickRecords.map((preset) => {
+            const targetCat = data.categories.find((c) => c.name === preset.category)
+              || data.categories.find((c) => c.isPositive)
+              || data.categories[0];
+            return (
+              <button
+                key={preset.title}
+                className="hero-record-btn"
+                type="button"
+                onClick={() => quickRecord(preset, targetCat)}
+              >
+                <span className="hero-btn-icon">+</span>
+                <span className="hero-btn-main">{preset.title}</span>
+                <span className="hero-btn-sub">{preset.duration} 分钟</span>
+              </button>
+            );
+          })}
+        </div>
+        {/* Today snapshot */}
+        {todayEvents.length > 0 && (
+          <div className="hero-snapshot">
+            <span>今天已记录 <strong>{formatMinutes(stats.total)}</strong></span>
+            <span>·</span>
+            <span>完成 <strong>{todayCompletedTasks.length}</strong> 项任务</span>
+          </div>
+        )}
       </section>
 
       <div className="dashboard-grid" id="workspace">
@@ -844,31 +985,92 @@ function App() {
             <a href="#system-tools">系统备份</a>
           </nav>
 
-          <section className="sidebar-section" aria-label="资产分类筛选">
-            <div className="panel-title compact">
-              <p className="eyebrow">Filter</p>
-              <h3>资产分类</h3>
-            </div>
-            <div className="filter-list">
+          <section className="sidebar-section" aria-label="资产分类">
+            <div className="panel-title compact category-panel-header">
+              <div>
+                <p className="eyebrow">Categories</p>
+                <h3>资产分类</h3>
+              </div>
               <button
-                className={activeCategoryFilter === "all" ? "is-active" : ""}
+                className={`icon-button ${categoryEditMode ? "is-active" : ""}`}
                 type="button"
-                onClick={() => setActiveCategoryFilter("all")}
+                onClick={() => setCategoryEditMode((prev) => !prev)}
+                aria-label="管理分类"
+                title="管理分类"
               >
-                全部项目
+                <Settings size={16} aria-hidden="true" />
               </button>
-              {data.categories.map((category) => (
-                <button
-                  className={activeCategoryFilter === category.name ? "is-active" : ""}
-                  type="button"
-                  key={category.id}
-                  onClick={() => setActiveCategoryFilter(category.name)}
-                >
-                  <i style={{ "--tone": category.color }} />
-                  {category.name}
-                </button>
-              ))}
             </div>
+
+            {/* Filter mode */}
+            {!categoryEditMode && (
+              <div className="filter-list">
+                <button
+                  className={activeCategoryFilter === "all" ? "is-active" : ""}
+                  type="button"
+                  onClick={() => setActiveCategoryFilter("all")}
+                >
+                  全部项目
+                </button>
+                {data.categories.map((category) => (
+                  <button
+                    className={activeCategoryFilter === category.name ? "is-active" : ""}
+                    type="button"
+                    key={category.id}
+                    onClick={() => setActiveCategoryFilter(category.name)}
+                  >
+                    <i style={{ "--tone": category.color }} />
+                    {category.name}
+                    {!category.isPositive && <span className="cat-tag">消耗</span>}
+                    {category.isPositive && <span className="cat-tag positive">资产</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Edit mode */}
+            {categoryEditMode && (
+              <div className="category-edit-list">
+                {data.categories.map((category, idx) => (
+                  <div className="category-edit-row" key={category.id}>
+                    <span className="cat-grip" title="拖拽排序">
+                      <GripVertical size={14} aria-hidden="true" />
+                    </span>
+                    <InlineCategoryEditor
+                      category={category}
+                      onSave={(updates) => updateCategory(category.id, updates)}
+                      onDelete={() => deleteCategory(category.id)}
+                      canDelete={data.categories.length > 1}
+                    />
+                  </div>
+                ))}
+                {/* Quick add in edit mode */}
+                <form
+                  className="category-add-inline"
+                  onSubmit={(e) => { e.preventDefault(); addCategory(e); }}
+                >
+                  <input
+                    value={categoryForm.name}
+                    onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })}
+                    placeholder="新分类名称"
+                    aria-label="新分类名称"
+                    className="cat-add-input"
+                  />
+                  <select
+                    value={categoryForm.kind}
+                    onChange={(e) => setCategoryForm({ ...categoryForm, kind: e.target.value, isPositive: e.target.value !== "drain", type: e.target.value === "drain" ? "consumption" : "growth" })}
+                    className="cat-add-select"
+                  >
+                    <option value="asset">正向资产</option>
+                    <option value="maintenance">生存任务</option>
+                    <option value="drain">注意力消耗</option>
+                  </select>
+                  <button type="submit" className="icon-button" title="添加分类">
+                    <Plus size={14} aria-hidden="true" />
+                  </button>
+                </form>
+              </div>
+            )}
           </section>
 
           <section className="sidebar-section">
@@ -913,10 +1115,10 @@ function App() {
             </div>
           </section>
 
-          <form className="stack-form compact-form new-project-form" onSubmit={addProject} ref={projectFormRef}>
+          <form className="stack-form compact-form new-project-form secondary-form" onSubmit={addProject} ref={projectFormRef}>
             <div className="panel-title compact">
-              <p className="eyebrow">Create</p>
-              <h3>新建项目</h3>
+              <p className="eyebrow">Project</p>
+              <h3>+ 新建项目</h3>
             </div>
             <input
               data-testid="project-name"
