@@ -843,7 +843,7 @@ function App() {
     };
     updateData((current) => ({ ...current, events: [ev, ...current.events] }));
     showToast(
-      ,
+      `✅ 已记录「${preset.title}」${preset.duration}分钟`,
       () => {
         updateData((current) => ({
           ...current,
