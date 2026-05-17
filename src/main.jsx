@@ -291,7 +291,7 @@ const calcQuotaFromHistory = (data) => {
     const total = recentEvents.reduce((sum, e) => sum + e.duration, 0);
     return { quota: Math.round(total / recentEvents.length), source: "14d-average" };
   }
-  return { quota: 300, source: "default" };
+  return { quota: 180, source: "default" };
 };
 
 const calcCategoryRatio = (data) => {
@@ -335,7 +335,7 @@ const generateDailySchedule = (data) => {
       start: minutesToTime(blockStart),
       end: minutesToTime(blockStart + SCHED_SLOT),
       title: task.title,
-      category: "生存任务",
+      category: (data.projects.find((p) => p.id === task.projectId) || {}).category || data.categories[0]?.name || "学业资产",
       projectId: task.projectId,
       taskId: task.id,
       kind: "task",
@@ -348,7 +348,8 @@ const generateDailySchedule = (data) => {
 
   const placeholderTitles = ["学习", "训练", "复盘", "整理"];
   let phIdx = 0;
-  while (minutesLeft >= SCHED_SLOT) {
+  const MAX_PLACEHOLDERS = 4;
+  while (minutesLeft >= SCHED_SLOT && phIdx < MAX_PLACEHOLDERS) {
     const blockStart = SCHED_WINDOW_START + slotIndex * SCHED_SLOT;
     if (blockStart + SCHED_SLOT > SCHED_WINDOW_END) break;
     blocks.push({
@@ -397,8 +398,19 @@ function App() {
   const [activeCategoryFilter, setActiveCategoryFilter] = useState("all");
   const [conversionTargets, setConversionTargets] = useState({});
   const [importError, setImportError] = useState("");
-  const [schedule, setSchedule] = useState(() => null);
-  const [scheduleGenerated, setScheduleGenerated] = useState(() => false);
+  const [schedule, setSchedule] = useState(() => {
+    const raw = loadReviewData();
+    const today = localDateKey();
+    return raw.schedules.find((s) => s.date === today) || null;
+  });
+  const [scheduleGenerated, setScheduleGenerated] = useState(() => {
+    const raw = loadReviewData();
+    const today = localDateKey();
+    return raw.schedules.some((s) => s.date === today);
+  });
+  const [toast, setToast] = useState(null);
+  const [undoAction, setUndoAction] = useState(null);
+  const toastTimerRef = useRef(null);
 
   const reviewRef = useRef(null);
   const projectFormRef = useRef(null);
@@ -484,6 +496,11 @@ function App() {
       settings: { ...current.settings, activeProjectId: project.id },
     }));
     setProjectForm({ name: "", description: "", category: projectForm.category });
+    // Auto-focus task input on next render
+    setTimeout(() => {
+      taskInputRef.current?.focus();
+      taskInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
   };
 
   const deleteProject = (projectId) => {
@@ -631,7 +648,7 @@ function App() {
       title,
       duration: Math.round(duration),
       category: eventForm.category,
-      projectId: eventForm.projectId || activeProject?.id || null,
+      projectId: eventForm.projectId === "__none__" ? null : (eventForm.projectId || activeProject?.id || null),
       createdAt: nowIso(),
     };
     updateData((current) => ({ ...current, events: [dailyEvent, ...current.events] }));
@@ -675,6 +692,42 @@ function App() {
       ...current,
       reviews: [review, ...current.reviews.filter((item) => item.date !== todayKey)],
     }));
+    showToast('✅ 今日复盘已保存');
+  };
+
+  const showToast = (msg, undo) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast(msg);
+    setUndoAction(undo || null);
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null);
+      setUndoAction(null);
+    }, 5000);
+  };
+
+  const quickRecord = (preset) => {
+    if (!activeProject) {
+      showToast('⚠️ 请先选择或创建一个项目');
+      return;
+    }
+    const ev = {
+      id: makeId('event'),
+      title: preset.title,
+      duration: Number(preset.duration),
+      category: preset.category,
+      projectId: activeProject.id,
+      createdAt: nowIso(),
+    };
+    updateData((current) => ({ ...current, events: [ev, ...current.events] }));
+    showToast(
+      ,
+      () => {
+        updateData((current) => ({
+          ...current,
+          events: current.events.filter((e) => e.id !== ev.id),
+        }));
+      }
+    );
   };
 
   const exportReviewPng = async () => {
@@ -728,6 +781,16 @@ function App() {
   };
 
   const resetBrokenStorage = () => {
+    const confirmed = window.confirm(
+      '⚠️ 重置将清除所有本地数据（项目、任务、事件、复盘记录）。
+
+建议先点击「导出 JSON」备份数据。
+
+确定要重置吗？'
+    );
+    if (!confirmed) return;
+    const doubleConfirmed = window.confirm('再次确认：所有数据将被清空，不可恢复。确定继续？');
+    if (!doubleConfirmed) return;
     updateData(createDefaultData());
   };
 
@@ -1005,7 +1068,7 @@ function App() {
               </div>
               {!scheduleGenerated ? (
                 <div className="schedule-empty">
-                  <p>今日还没生成日程。</p>
+                  <p>今日还没生成日程。基于你的历史数据智能排程。</p>
                   <button type="button" onClick={handleGenerateSchedule}>
                     生成今日日程
                   </button>
@@ -1024,7 +1087,7 @@ function App() {
                     <span>来源 <strong>{{
                       "28d-same-weekday": "近28天同星期几平均",
                       "14d-average": "近14天平均",
-                      "default": "默认额度"
+                      "default": "默认建议（尚未基于历史）"
                     }[schedule.source] || schedule.source}</strong></span>
                   </div>
                   <div className="schedule-blocks">
@@ -1236,7 +1299,8 @@ function App() {
                 }
                 aria-label="关联项目"
               >
-                <option value="">关联当前项目或不关联</option>
+                <option value={activeProject?.id || ""}>关联当前项目{activeProject ? '：' + activeProject.name : ''}</option>
+                <option value="__none__">不关联项目</option>
                 {data.projects.map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.name}
@@ -1324,25 +1388,19 @@ function App() {
           <section className="quick-panel">
             <div className="panel-title compact">
               <p className="eyebrow">Habits</p>
-              <h3>习惯 / 快捷记录</h3>
+              <h3>快捷记录（点击即记）</h3>
             </div>
             <div className="quick-actions">
               {quickRecordPresets.map((preset) => (
                 <button
-                  className="ghost-button"
+                  className="ghost-button quick-record-btn"
                   type="button"
                   key={preset.title}
-                  onClick={() =>
-                    setEventForm((current) => ({
-                      ...current,
-                      title: preset.title,
-                      duration: preset.duration,
-                      category: preset.category,
-                      projectId: activeProject?.id || current.projectId,
-                    }))
-                  }
+                  onClick={() => quickRecord(preset)}
+                  title={}
                 >
                   {preset.title}
+                  <small>{preset.duration}min</small>
                 </button>
               ))}
             </div>
@@ -1398,6 +1456,18 @@ function App() {
                 PNG
               </button>
             </div>
+            {data.reviews.length > 0 && (
+              <div className="review-history">
+                <p className="eyebrow">最近复盘</p>
+                {data.reviews.slice(0, 7).map((r) => (
+                  <div key={r.id} className="review-history-row">
+                    <span>{r.date}</span>
+                    <span>{formatMinutes(r.totalMinutes)}</span>
+                    <span>{r.completedTaskCount}项</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="system-panel" id="system-tools">
@@ -1462,6 +1532,16 @@ function App() {
           </section>
         </aside>
       </div>
+    {toast && (
+        <div className="toast-container">
+          <span>{toast}</span>
+          {undoAction && (
+            <button className="toast-undo" type="button" onClick={() => { undoAction(); setToast(null); setUndoAction(null); }}>
+              撤销
+            </button>
+          )}
+        </div>
+      )}
     </main>
   );
 }
