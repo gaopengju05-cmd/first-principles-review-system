@@ -932,11 +932,16 @@ function App() {
         {importError ? <strong>{importError}</strong> : null}
       </section>
 
-      {/* Hero: 快速记录今天 */}
+      {/* Hero: compact toolbar */}
       <section className="hero-panel">
-        <div className="hero-copy">
-          <h1>快速记录今天</h1>
-          <p>先记录，再复盘。30 秒看清你今天把时间投给了什么。</p>
+        <div className="hero-bar">
+          <h1 className="hero-title">快速记录今天</h1>
+          {(todayEvents.length > 0 || todayCompletedTasks.length > 0) && (
+            <div className="hero-snapshot">
+              {todayEvents.length > 0 && <span>已记录 <strong>{formatMinutes(stats.total)}</strong></span>}
+              {todayCompletedTasks.length > 0 && <span>完成 <strong>{todayCompletedTasks.length}</strong> 项</span>}
+            </div>
+          )}
         </div>
         <div className="hero-actions">
           {heroQuickRecords.map((preset) => {
@@ -950,21 +955,12 @@ function App() {
                 type="button"
                 onClick={() => quickRecord(preset, targetCat)}
               >
-                <span className="hero-btn-icon">+</span>
-                <span className="hero-btn-main">{preset.title}</span>
-                <span className="hero-btn-sub">{preset.duration} 分钟</span>
+                <span className="hero-btn-label">{preset.title}</span>
+                <span className="hero-btn-meta">{preset.duration}min</span>
               </button>
             );
           })}
         </div>
-        {/* Today snapshot */}
-        {todayEvents.length > 0 && (
-          <div className="hero-snapshot">
-            <span>今天已记录 <strong>{formatMinutes(stats.total)}</strong></span>
-            <span>·</span>
-            <span>完成 <strong>{todayCompletedTasks.length}</strong> 项任务</span>
-          </div>
-        )}
       </section>
 
       <div className="dashboard-grid" id="workspace">
