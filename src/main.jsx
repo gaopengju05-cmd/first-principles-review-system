@@ -905,11 +905,7 @@ function App() {
 
   const resetBrokenStorage = () => {
     const confirmed = window.confirm(
-      '⚠️ 重置将清除所有本地数据（项目、任务、事件、复盘记录）。
-
-建议先点击「导出 JSON」备份数据。
-
-确定要重置吗？'
+      '⚠️ 重置将清除所有本地数据（项目、任务、事件、复盘记录）。\n\n建议先点击「导出 JSON」备份数据。\n\n确定要重置吗？'
     );
     if (!confirmed) return;
     const doubleConfirmed = window.confirm('再次确认：所有数据将被清空，不可恢复。确定继续？');
