@@ -238,10 +238,10 @@ const buildReview = ({ data, todayEvents, todayIdeas, todayCompletedTasks, today
   const categoryMap = new Map(data.categories.map((category) => [category.name, category]));
   const totalMinutes = todayEvents.reduce((sum, event) => sum + event.duration, 0);
   const assetMinutes = todayEvents
-    .filter((event) => categoryMap.get(event.category)?.kind === "asset")
+    .filter((event) => categoryMap.get(event.category)?.isPositive !== false)
     .reduce((sum, event) => sum + event.duration, 0);
   const drainMinutes = todayEvents
-    .filter((event) => categoryMap.get(event.category)?.kind === "drain")
+    .filter((event) => categoryMap.get(event.category)?.isPositive === false)
     .reduce((sum, event) => sum + event.duration, 0);
   const openTask = data.tasks.find((task) => !task.completed);
   const openIdea = data.ideas.find((idea) => idea.status !== "converted");
@@ -450,9 +450,11 @@ const InlineCategoryEditor = ({ category, onSave, onDelete, canDelete }) => {
   );
 };
 
+const PAGES = ["record", "review", "dashboard", "assets"];
 const getPageFromURL = () => {
   const params = new URLSearchParams(window.location.search);
-  return params.get("page") === "assets" ? "assets" : "record";
+  const p = params.get("page");
+  return PAGES.includes(p) ? p : "record";
 };
 
 function App() {
@@ -464,10 +466,10 @@ function App() {
   const navigateTo = (p) => {
     setPage(p);
     const url = new URL(window.location);
-    if (p === "assets") {
-      url.searchParams.set("page", "assets");
-    } else {
+    if (p === "record") {
       url.searchParams.delete("page");
+    } else {
+      url.searchParams.set("page", p);
     }
     window.history.pushState({}, "", url);
   };
@@ -533,6 +535,9 @@ function App() {
       minutes: todayEvents
         .filter((event) => event.category === category.name)
         .reduce((sum, event) => sum + event.duration, 0),
+      netContribution: todayEvents
+        .filter((event) => event.category === category.name)
+        .reduce((sum, event) => sum + (category.isPositive ? event.duration : -event.duration), 0),
     }));
 
     const byProject = data.projects.map((project) => ({
@@ -920,6 +925,69 @@ function App() {
     ? getCategory(data.categories, activeProject.category)
     : data.categories[0] || DEFAULT_CATEGORIES[0];
   const topCategory = stats.byCategory[0];
+
+  // Net asset computation for review page
+  const netAssetMinutes = todayEvents.reduce((sum, ev) => {
+    const cat = data.categories.find((c) => c.name === ev.category);
+    if (!cat) return sum;
+    return cat.isPositive ? sum + ev.duration : sum - ev.duration;
+  }, 0);
+
+  // Continuous record days
+  const consecutiveDays = (() => {
+    const dates = [...new Set(data.events.map((e) => localDateKey(e.createdAt)))].sort().reverse();
+    if (dates.length === 0) return 0;
+    let count = 1;
+    const today = localDateKey();
+    if (dates[0] !== today) return 0;
+    for (let i = 1; i < dates.length; i++) {
+      const prev = new Date(dates[i-1]);
+      const curr = new Date(dates[i]);
+      const diff = (prev - curr) / (1000 * 60 * 60 * 24);
+      if (Math.round(diff) === 1) count++;
+      else break;
+    }
+    return count;
+  })();
+
+  // 7-day net asset trend
+  const netAsset7Day = (() => {
+    const days = [];
+    const today = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const key = localDateKey(d);
+      const dayEvents = data.events.filter((e) => localDateKey(e.createdAt) === key);
+      const net = dayEvents.reduce((sum, ev) => {
+        const cat = data.categories.find((c) => c.name === ev.category);
+        if (!cat) return sum;
+        return cat.isPositive ? sum + ev.duration : sum - ev.duration;
+      }, 0);
+      days.push({ date: key, net, label: `${d.getMonth()+1}/${d.getDate()}` });
+    }
+    return days;
+  })();
+
+  // 30-day category cumulative
+  const cat30Day = (() => {
+    const today = new Date();
+    const cutoff = new Date(today);
+    cutoff.setDate(cutoff.getDate() - 30);
+    const map = {};
+    data.events.forEach((e) => {
+      const d = new Date(e.createdAt);
+      if (d >= cutoff) {
+        map[e.category] = (map[e.category] || 0) + e.duration;
+      }
+    });
+    return Object.entries(map)
+      .map(([name, minutes]) => ({ name, minutes }))
+      .sort((a, b) => b.minutes - a.minutes);
+  })();
+
+  // Mainline asset (category marked as current phase focus)
+  const mainlineCategory = data.categories.find((c) => c.type === "growth" && c.isPositive) || data.categories.find((c) => c.isPositive);
   const filteredProjects =
     activeCategoryFilter === "all"
       ? data.projects
@@ -941,922 +1009,386 @@ function App() {
 
   return (
     <main className="review-os">
-      {/* Tab bar */}
-      <nav className="tab-bar">
-        <button
-          className={`tab-btn ${page === "record" ? "is-active" : ""}`}
-          type="button"
-          onClick={() => navigateTo("record")}
-        >
-          记录
-        </button>
-        <button
-          className={`tab-btn ${page === "assets" ? "is-active" : ""}`}
-          type="button"
-          onClick={() => navigateTo("assets")}
-        >
-          资产
-        </button>
-      </nav>
-      <section className="system-status" aria-live="polite">
-        <span>
-          <ShieldCheck size={15} aria-hidden="true" />
-          {storageMessage}
-        </span>
-        <span>localStorage: {STORAGE_KEY}</span>
-        {importError ? <strong>{importError}</strong> : null}
-      </section>
-
-      
-      {page === "record" && (
-      <>
-      {/* Hero: compact toolbar */}
-      <section className="hero-panel">
-        <div className="hero-bar">
-          <h1 className="hero-title">快速记录今天</h1>
-          {(todayEvents.length > 0 || todayCompletedTasks.length > 0) && (
-            <div className="hero-snapshot">
-              {todayEvents.length > 0 && <span>已记录 <strong>{formatMinutes(stats.total)}</strong></span>}
-              {todayCompletedTasks.length > 0 && <span>完成 <strong>{todayCompletedTasks.length}</strong> 项</span>}
-            </div>
-          )}
-        </div>
-        <div className="hero-actions">
-          {heroQuickRecords.map((preset) => {
-            const targetCat = data.categories.find((c) => c.name === preset.category)
-              || data.categories.find((c) => c.isPositive)
-              || data.categories[0];
-            return (
-              <button
-                key={preset.title}
-                className="hero-record-btn"
-                type="button"
-                onClick={() => quickRecord(preset, targetCat)}
-              >
-                <span className="hero-btn-label">{preset.title}</span>
-                <span className="hero-btn-meta">{preset.duration}min</span>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      <div className="dashboard-grid" id="workspace">
-        <aside className="sidebar-panel record-sidebar">
+      <div className="app-layout">
+        <aside className="app-sidebar">
           <div className="sidebar-brand">
-            <div className="brand-mark">
-              <span />
-              Personal Review System
-            </div>
+            <div className="brand-mark"><span />Personal Review System</div>
             <p>Life · Assets · Progress</p>
           </div>
-
-          <nav className="side-nav" aria-label="工作台导航">
-            <a href="#task-list">子任务</a>
-            <a href="#idea-pool">想法池</a>
-            <a href="#today-review">今日复盘</a>
+          <nav className="app-nav">
+            <p className="nav-section-label">核心</p>
+            <button className={`nav-item ${page === "record" ? "is-active" : ""}`} type="button" onClick={() => navigateTo("record")}>快速记录</button>
+            <button className={`nav-item ${page === "review" ? "is-active" : ""}`} type="button" onClick={() => navigateTo("review")}>今日复盘</button>
+            <button className={`nav-item ${page === "dashboard" ? "is-active" : ""}`} type="button" onClick={() => navigateTo("dashboard")}>仪表盘</button>
+            <p className="nav-section-label">系统</p>
+            <button className={`nav-item ${page === "assets" ? "is-active" : ""}`} type="button" onClick={() => navigateTo("assets")}>资产定义</button>
           </nav>
-
-          {/* Quick project switcher */}
-          <section className="sidebar-section">
-            <div className="panel-title compact" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <p className="eyebrow">Focus</p>
-                <h3>当前项目</h3>
-              </div>
-              <button
-                className="icon-button"
-                type="button"
-                onClick={() => navigateTo("assets")}
-                title="管理项目与分类"
-                style={{ width: "28px", height: "28px", minHeight: "28px", flex: "0 0 28px" }}
-              >
-                <Settings size={14} aria-hidden="true" />
-              </button>
-            </div>
-            {data.projects.length === 0 ? (
-              <div style={{ padding: "8px 0" }}>
-                <p className="empty-text">还没有项目</p>
-                <button
-                  className="cta-button"
-                  type="button"
-                  onClick={() => navigateTo("assets")}
-                  style={{ marginTop: "8px", width: "100%", justifyContent: "center", fontSize: "0.8rem", padding: "8px 12px" }}
-                >
-                  <Plus size={14} aria-hidden="true" />
-                  去创建项目
-                </button>
-              </div>
-            ) : (
-              <div className="project-list">
-                {data.projects.map((project) => (
-                  <div
-                    className={`project-row ${activeProject?.id === project.id ? "is-active" : ""}`}
-                    key={project.id}
-                  >
-                    <button
-                      className="project-select-button"
-                      type="button"
-                      onClick={() => setActiveProject(project.id)}
-                    >
-                      <span className="project-row-title">{project.name}</span>
-                      <span className="progress-track" aria-label={`${project.name} 进度`}>
-                        <span style={{ width: `${project.progress}%` }} />
-                      </span>
-                      <strong>{project.progress}%</strong>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
         </aside>
-
-        <section className="main-panel" id="project-workbench">
-          <div className="focus-header">
-            <div>
-              <p className="eyebrow">Current Focus</p>
-              <h2>{activeProject ? activeProject.name : "选择一个长期资产"}</h2>
-              {activeProject ? (
-                <p>{activeProject.description || "建立项目后，这里会变成今天的执行中心。"}</p>
-              ) : (
-                <div style={{ marginTop: '12px' }}>
-                  <p>先创建你的第一个资产项目，然后就能添加子任务、记录时间投入。</p>
-                  <button
-                    type="button"
-                    className="cta-button"
-                    onClick={() => {
-                      projectFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                      projectFormRef.current?.querySelector('input')?.focus();
-                    }}
-                    style={{ marginTop: '8px' }}
-                  >
-                    <Plus size={18} aria-hidden="true" />
-                    立即创建项目
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="focus-score" style={{ "--tone": activeCategory.color }}>
-              <span>{activeProject ? activeProject.category : "未开始"}</span>
-              <strong>{activeProject ? `${activeProject.progress}%` : "0%"}</strong>
-            </div>
-          </div>
-
-          <div className="progress-block">
-            <div>
-              <span>资产推进</span>
-              <strong>{activeProject ? `${activeProject.progress}%` : "等待项目"}</strong>
-            </div>
-            <span className="progress-track big">
-              <span style={{ width: `${activeProject?.progress || 0}%` }} />
-            </span>
-          </div>
-
-          <div className="work-grid">
-            <section className="work-card" id="task-list">
-              <div className="panel-title compact">
-                <p className="eyebrow">Tasks</p>
-                <h3>下一步动作</h3>
-              </div>
-              <form className="inline-form" onSubmit={addTask}>
-                <input
-                  ref={taskInputRef}
-                  data-testid="task-title"
-                  value={taskTitle}
-                  onChange={(event) => setTaskTitle(event.target.value)}
-                  placeholder="给当前项目新增子任务"
-                  aria-label="新增子任务"
-                />
-                <button data-testid="add-task" type="submit" disabled={!activeProject}>
-                  <Plus size={18} aria-hidden="true" />
-                  添加
-                </button>
-              </form>
-              <div className="task-list" aria-label="子任务列表">
-                {!activeProject ? (
-                  <div className="empty-state-action">
-                    <p className="empty-text">需要一个项目来承载任务。</p>
-                    <button
-                      type="button"
-                      className="cta-button"
-                      onClick={() => {
-                        projectFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        projectFormRef.current?.querySelector('input')?.focus();
-                      }}
-                    >
-                      <Plus size={16} aria-hidden="true" />
-                      创建项目
-                    </button>
-                  </div>
-                ) : activeProjectTasks.length === 0 ? (
-                  <p className="empty-text">暂无任务。写下一个今天可以完成的小动作。</p>
-                ) : (
-                  activeProjectTasks.map((task) => (
-                    <div className="task-row" key={task.id}>
-                      <button
-                        data-testid="toggle-task"
-                        className={`check-button ${task.completed ? "checked" : ""}`}
-                        type="button"
-                        onClick={() => toggleTask(task.id)}
-                        aria-label={task.completed ? "标记为未完成" : "标记为完成"}
-                      >
-                        {task.completed ? <Check size={16} aria-hidden="true" /> : null}
-                      </button>
-                      <span className={task.completed ? "done-text" : ""}>{task.title}</span>
-                      <button
-                        className="icon-button"
-                        type="button"
-                        onClick={() => deleteTask(task.id)}
-                        aria-label="删除任务"
-                      >
-                        <Trash2 size={16} aria-hidden="true" />
-                      </button>
+        <div className="app-content">
+          <section className="system-status" aria-live="polite">
+            <span><ShieldCheck size={15} aria-hidden="true" />{storageMessage}</span>
+            <span>localStorage: {STORAGE_KEY}</span>
+            {importError ? <strong>{importError}</strong> : null}
+          </section>
+          
+          {/* ═══════════ 快速记录页 ═══════════ */}
+          {page === "record" && (
+            <div className="page-record">
+              {/* Hero quick record */}
+              <section className="hero-panel">
+                <div className="hero-bar">
+                  <h1 className="hero-title">快速记录今天</h1>
+                  {(todayEvents.length > 0 || todayCompletedTasks.length > 0) && (
+                    <div className="hero-snapshot">
+                      {todayEvents.length > 0 && <span>已记录 <strong>{formatMinutes(stats.total)}</strong></span>}
+                      {todayCompletedTasks.length > 0 && <span>完成 <strong>{todayCompletedTasks.length}</strong> 项</span>}
                     </div>
-                  ))
-                )}
-              </div>
-            </section>
-
-            <section className="work-card" id="daily-schedule">
-              <div className="panel-title compact">
-                <p className="eyebrow">Daily Schedule</p>
-                <h3>今日日程</h3>
-              </div>
-              {!scheduleGenerated ? (
-                <div className="schedule-empty">
-                  <p>今日还没生成日程。基于你的历史数据智能排程。</p>
-                  <button type="button" onClick={handleGenerateSchedule}>
-                    生成今日日程
-                  </button>
+                  )}
                 </div>
-              ) : (
-                <div className="schedule-body">
-                  <div className="schedule-meta">
-                    <span>总额度 <strong>{formatMinutes(schedule.quotaMinutes)}</strong></span>
-                    <span>已安排 <strong>{formatMinutes(
-                      schedule.blocks.reduce((sum, b) => {
-                        const [sh, sm] = b.start.split(":").map(Number);
-                        const [eh, em] = b.end.split(":").map(Number);
-                        return sum + (eh * 60 + em - sh * 60 - sm);
-                      }, 0)
-                    )}</strong></span>
-                    <span>来源 <strong>{{
-                      "28d-same-weekday": "近28天同星期几平均",
-                      "14d-average": "近14天平均",
-                      "default": "默认建议（尚未基于历史）"
-                    }[schedule.source] || schedule.source}</strong></span>
+                <div className="hero-actions">
+                  {heroQuickRecords.map((preset) => {
+                    const targetCat = data.categories.find((c) => c.name === preset.category)
+                      || data.categories.find((c) => c.isPositive)
+                      || data.categories[0];
+                    return (
+                      <button key={preset.title} className="hero-record-btn" type="button" onClick={() => quickRecord(preset, targetCat)}>
+                        <span className="hero-btn-label">{preset.title}</span>
+                        <span className="hero-btn-meta">{preset.duration}min</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              {/* Manual record form */}
+              <section className="work-card">
+                <div className="panel-title compact">
+                  <p className="eyebrow">Record</p>
+                  <h3>今天做了什么？</h3>
+                </div>
+                <form className="stack-form compact-form" onSubmit={addEvent}>
+                  <input
+                    data-testid="event-title"
+                    value={eventForm.title}
+                    onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
+                    placeholder="做了什么"
+                    aria-label="事件标题"
+                  />
+                  <div className="two-columns">
+                    <input
+                      data-testid="event-duration"
+                      type="number" min="1" step="1"
+                      value={eventForm.duration}
+                      onChange={(e) => setEventForm({ ...eventForm, duration: e.target.value })}
+                      placeholder="分钟"
+                      aria-label="事件时长"
+                    />
+                    <select
+                      value={eventForm.category}
+                      onChange={(e) => setEventForm({ ...eventForm, category: e.target.value })}
+                      aria-label="事件分类"
+                    >
+                      {data.categories.map((cat) => (
+                        <option key={cat.id} value={cat.name}>{cat.name}</option>
+                      ))}
+                    </select>
                   </div>
-                  <div className="schedule-blocks">
-                    {schedule.blocks.map((block) => (
-                      <div className="schedule-block" key={block.id}>
-                        <span className="block-time">{block.start}–{block.end}</span>
-                        <span className="block-title">{block.title}</span>
-                        <span className="block-category">{block.category}</span>
+                  <select
+                    value={eventForm.projectId}
+                    onChange={(e) => setEventForm({ ...eventForm, projectId: e.target.value })}
+                    aria-label="关联项目"
+                  >
+                    <option value={activeProject?.id || ""}>关联当前项目{activeProject ? "：" + activeProject.name : ""}</option>
+                    <option value="__none__">不关联项目</option>
+                    {data.projects.map((project) => (
+                      <option key={project.id} value={project.id}>{project.name}</option>
+                    ))}
+                  </select>
+                  <button data-testid="add-event" type="submit">
+                    <Plus size={18} aria-hidden="true" />添加记录
+                  </button>
+                </form>
+              </section>
+
+              {/* Today's records list */}
+              <section className="work-card">
+                <div className="panel-title compact">
+                  <p className="eyebrow">Today</p>
+                  <h3>今日已记录</h3>
+                </div>
+                <div className="event-list" aria-label="今日事件列表">
+                  {todayEvents.length === 0 ? (
+                    <p className="empty-text">还没有今天的记录。点击上方按钮或填写表单开始。</p>
+                  ) : (
+                    todayEvents.map((dailyEvent) => {
+                      const cat = getCategory(data.categories, dailyEvent.category);
+                      const project = data.projects.find((item) => item.id === dailyEvent.projectId);
+                      return (
+                        <div className="event-row" key={dailyEvent.id}>
+                          <span style={{ background: cat.color }} />
+                          <div>
+                            <strong>{dailyEvent.title}</strong>
+                            <small>{dailyEvent.category}{project ? " · " + project.name : ""}</small>
+                          </div>
+                          <b>{formatMinutes(dailyEvent.duration)}</b>
+                          <button className="icon-button" type="button" onClick={() => deleteEvent(dailyEvent.id)} aria-label={`删除事件 ${dailyEvent.title}`}>
+                            <Trash2 size={16} aria-hidden="true" />
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </section>
+            </div>
+          )}
+
+          {/* ═══════════ 今日复盘页 ═══════════ */}
+          {page === "review" && (
+            <div className="page-review">
+              <div className="page-header">
+                <h2>今日复盘</h2>
+                <p className="text-soft">{todayKey}</p>
+              </div>
+
+              {/* Net asset judgment */}
+              <section className="review-judgment">
+                <div className="judgment-badge" style={{ "--judgment": netAssetMinutes > 0 ? "var(--blue)" : netAssetMinutes === 0 ? "var(--amber)" : "var(--danger)" }}>
+                  {netAssetMinutes > 0 ? "正向积累" : netAssetMinutes === 0 ? "持平" : "消耗为主"}
+                </div>
+                <div className="judgment-metrics">
+                  <div className="judgment-metric">
+                    <span>总投入</span>
+                    <strong>{formatMinutes(stats.total)}</strong>
+                  </div>
+                  <div className="judgment-metric positive">
+                    <span>正向资产</span>
+                    <strong>{formatMinutes(review.assetMinutes)}</strong>
+                  </div>
+                  <div className="judgment-metric negative">
+                    <span>注意力消耗</span>
+                    <strong>{formatMinutes(review.drainMinutes)}</strong>
+                  </div>
+                  <div className="judgment-metric" style={{ "--tone": netAssetMinutes >= 0 ? "var(--blue)" : "var(--danger)" }}>
+                    <span>净资产</span>
+                    <strong>{netAssetMinutes >= 0 ? "+" : ""}{formatMinutes(Math.abs(netAssetMinutes))}</strong>
+                  </div>
+                </div>
+              </section>
+
+              {/* Category distribution */}
+              <section className="work-card">
+                <div className="panel-title compact">
+                  <p className="eyebrow">Distribution</p>
+                  <h3>各分类分布</h3>
+                </div>
+                {stats.byCategory.filter((item) => item.minutes > 0).length === 0 ? (
+                  <p className="empty-text">今天还没有记录。</p>
+                ) : (
+                  <div className="cat-distribution">
+                    {stats.byCategory.filter((item) => item.minutes > 0).sort((a, b) => b.minutes - a.minutes).map((item) => {
+                      const pct = stats.total > 0 ? Math.round((item.minutes / stats.total) * 100) : 0;
+                      return (
+                        <div className="dist-row" key={item.id}>
+                          <span className="dist-color" style={{ background: item.color }} />
+                          <span className="dist-name">{item.name}</span>
+                          <span className="dist-bar-track">
+                            <span className="dist-bar-fill" style={{ width: `${pct}%`, background: item.color }} />
+                          </span>
+                          <span className="dist-value">{formatMinutes(item.minutes)}</span>
+                          <span className="dist-pct">{pct}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              {/* System judgment + recommendation */}
+              <section className="work-card judgment-card">
+                <div className="panel-title compact">
+                  <p className="eyebrow">Judgment</p>
+                  <h3>系统判断</h3>
+                </div>
+                <div className="judgment-text">
+                  {netAssetMinutes > 0 ? (
+                    <p>今天你的资产投入高于消耗。明天继续保留第一段清醒时间给最重要的成长资产。</p>
+                  ) : netAssetMinutes === 0 ? (
+                    <p>今天你的资产投入和消耗持平。明天需要把第一段清醒时间从消耗项里抢回来。</p>
+                  ) : (
+                    <p>今天注意力消耗高于资产投入。明天先减少一个最低质量消耗项，再谈增加任务。</p>
+                  )}
+                </div>
+                <div className="recommendation-box">
+                  <span className="rec-label">明日第一行动建议</span>
+                  <p>{review.recommendation}</p>
+                </div>
+              </section>
+
+              {/* Recent reviews history */}
+              {data.reviews.length > 0 && (
+                <section className="work-card">
+                  <div className="panel-title compact">
+                    <p className="eyebrow">History</p>
+                    <h3>最近复盘</h3>
+                  </div>
+                  <div className="review-history-list">
+                    {data.reviews.slice(0, 7).map((r) => (
+                      <div key={r.id} className="review-history-row">
+                        <span>{r.date}</span>
+                        <span>{formatMinutes(r.totalMinutes)}</span>
+                        <span>{r.completedTaskCount}项任务</span>
                       </div>
                     ))}
                   </div>
-                  <div className="schedule-actions">
-                    <button type="button" onClick={handleGenerateSchedule}>
-                      重新生成
-                    </button>
-                    <button type="button" onClick={handleSaveSchedule}>
-                      保存日程历史
-                    </button>
-                  </div>
-                </div>
-              )}
-            </section>
-
-            <section className="work-card" id="project-records">
-
-              <div className="panel-title compact">
-                <p className="eyebrow">Records</p>
-                <h3>项目相关记录</h3>
-              </div>
-              <div className="event-list" aria-label="项目相关记录列表">
-                {!activeProject ? (
-                  <p className="empty-text">先选择项目后，这里会显示关联记录。</p>
-                ) : activeProjectEvents.length === 0 ? (
-                  <p className="empty-text">这个项目还没有关联记录。</p>
-                ) : (
-                  activeProjectEvents.map((projectEvent) => {
-                    const category = getCategory(data.categories, projectEvent.category);
-                    return (
-                      <div className="event-row" key={projectEvent.id}>
-                        <span style={{ background: category.color }} />
-                        <div>
-                          <strong>{projectEvent.title}</strong>
-                          <small>
-                            {projectEvent.category} · {localDateKey(projectEvent.createdAt)}
-                          </small>
-                        </div>
-                        <b>{formatMinutes(projectEvent.duration)}</b>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </section>
-          </div>
-
-          <section className="ideas-panel" id="idea-pool">
-          <div className="panel-title">
-            <p className="eyebrow">Ideas</p>
-            <h2>想法池</h2>
-          </div>
-          <form className="stack-form" onSubmit={addIdea}>
-            <textarea
-              data-testid="idea-content"
-              value={ideaForm.content}
-              onChange={(event) => setIdeaForm({ ...ideaForm, content: event.target.value })}
-              placeholder="记录一个还没成型的想法"
-              aria-label="想法内容"
-              rows={3}
-            />
-            <select
-              value={ideaForm.linkedProjectId}
-              onChange={(event) =>
-                setIdeaForm({ ...ideaForm, linkedProjectId: event.target.value })
-              }
-              aria-label="想法关联项目"
-            >
-              <option value="">暂不指定项目</option>
-              {data.projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-            <button data-testid="add-idea" type="submit">
-              <Lightbulb size={18} aria-hidden="true" />
-              收进想法池
-            </button>
-          </form>
-
-          <div className="idea-list" aria-label="想法列表">
-            {data.ideas.length === 0 ? (
-              <p className="empty-text">灵感先进入这里，再转成项目任务。</p>
-            ) : (
-              data.ideas.map((idea) => {
-                const linkedProject = data.projects.find(
-                  (project) => project.id === idea.linkedProjectId,
-                );
-                const targetProjectId =
-                  conversionTargets[idea.id] ||
-                  idea.linkedProjectId ||
-                  activeProject?.id ||
-                  data.projects[0]?.id ||
-                  "";
-                return (
-                  <div className="idea-row" key={idea.id}>
-                    <p>{idea.content}</p>
-                    <small>
-                      {idea.status === "converted" ? "已转任务" : "待处理"}
-                      {linkedProject ? ` · ${linkedProject.name}` : ""}
-                    </small>
-                    {idea.status !== "converted" ? (
-                      <div className="idea-actions">
-                        <select
-                          value={targetProjectId}
-                          onChange={(event) =>
-                            setConversionTargets({
-                              ...conversionTargets,
-                              [idea.id]: event.target.value,
-                            })
-                          }
-                          aria-label="选择想法转入的项目"
-                        >
-                          <option value="">选择目标项目</option>
-                          {data.projects.map((project) => (
-                            <option key={project.id} value={project.id}>
-                              {project.name}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          data-testid="convert-idea"
-                          className="small-button"
-                          type="button"
-                          disabled={!targetProjectId}
-                          onClick={() => convertIdeaToTask(idea.id, targetProjectId)}
-                        >
-                          转任务
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })
-            )}
-          </div>
-          </section>
-        </section>
-
-        <aside className="review-panel" id="today-review">
-          <section className="timeline-panel">
-            <div className="panel-title compact">
-              <p className="eyebrow">Today</p>
-              <h2>今日事件</h2>
-            </div>
-            <div className="schedule-quota-row">
-              <span>今日计划额度</span>
-              <strong>{scheduleGenerated ? formatMinutes(schedule.quotaMinutes) : "—"}</strong>
-            </div>
-            <div className="schedule-quota-row">
-              <span>实际记录时间</span>
-              <strong>{formatMinutes(stats.total)}</strong>
-            </div>
-            <div className="schedule-quota-row">
-              <span>差额</span>
-              <strong style={{ color: scheduleGenerated ? (stats.total > schedule.quotaMinutes ? "var(--danger)" : "var(--blue)" ) : "var(--text-mid)" }}>
-                {scheduleGenerated ? (stats.total > schedule.quotaMinutes ? `+${formatMinutes(stats.total - schedule.quotaMinutes)}` : formatMinutes(schedule.quotaMinutes - stats.total)) : "—"}
-              </strong>
-            </div>
-            <hr className="schedule-divider" />
-                        <form className="stack-form" onSubmit={addEvent}>
-              <input
-                data-testid="event-title"
-                value={eventForm.title}
-                onChange={(event) => setEventForm({ ...eventForm, title: event.target.value })}
-                placeholder="今天做了什么"
-                aria-label="事件标题"
-              />
-              <div className="two-columns">
-                <input
-                  data-testid="event-duration"
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={eventForm.duration}
-                  onChange={(event) =>
-                    setEventForm({ ...eventForm, duration: event.target.value })
-                  }
-                  placeholder="分钟"
-                  aria-label="事件时长"
-                />
-                <select
-                  value={eventForm.category}
-                  onChange={(event) =>
-                    setEventForm({ ...eventForm, category: event.target.value })
-                  }
-                  aria-label="事件分类"
-                >
-                  {data.categories.map((category) => (
-                    <option key={category.id} value={category.name}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <select
-                value={eventForm.projectId}
-                onChange={(event) =>
-                  setEventForm({ ...eventForm, projectId: event.target.value })
-                }
-                aria-label="关联项目"
-              >
-                <option value={activeProject?.id || ""}>关联当前项目{activeProject ? '：' + activeProject.name : ''}</option>
-                <option value="__none__">不关联项目</option>
-                {data.projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-              <button data-testid="add-event" type="submit">
-                <Plus size={18} aria-hidden="true" />
-                记录投入
-              </button>
-            </form>
-
-            <div className="event-list" aria-label="今日事件列表">
-              {todayEvents.length === 0 ? (
-                <p className="empty-text">记录真实投入后，今晚的复盘卡会自动变得有内容。</p>
-              ) : (
-                todayEvents.map((dailyEvent) => {
-                  const category = getCategory(data.categories, dailyEvent.category);
-                  const project = data.projects.find((item) => item.id === dailyEvent.projectId);
-                  return (
-                    <div className="event-row" key={dailyEvent.id}>
-                      <span style={{ background: category.color }} />
-                      <div>
-                        <strong>{dailyEvent.title}</strong>
-                        <small>
-                          {dailyEvent.category}
-                          {project ? ` · ${project.name}` : ""}
-                        </small>
-                      </div>
-                      <b>{formatMinutes(dailyEvent.duration)}</b>
-                      <button
-                        className="icon-button"
-                        type="button"
-                        onClick={() => deleteEvent(dailyEvent.id)}
-                        aria-label={`删除事件 ${dailyEvent.title}`}
-                      >
-                        <Trash2 size={16} aria-hidden="true" />
-                      </button>
-                    </div>
-                  );
-                })
+                </section>
               )}
             </div>
-          </section>
-
-          <section className="analytics-card">
-            <div className="panel-title compact">
-              <p className="eyebrow">Time Stats</p>
-              <h3>今日时间统计</h3>
-            </div>
-            <div className="metric-grid">
-              <div>
-                <BarChart3 size={18} aria-hidden="true" />
-                <span>总时间</span>
-                <strong>{formatMinutes(stats.total)}</strong>
-              </div>
-              <div>
-                <Target size={18} aria-hidden="true" />
-                <span>待办</span>
-                <strong>{openTaskCount}</strong>
-              </div>
-              <div>
-                <Lightbulb size={18} aria-hidden="true" />
-                <span>想法</span>
-                <strong>{openIdeaCount}</strong>
-              </div>
-            </div>
-            <div className="stats-list">
-              {stats.byCategory.length === 0 ? (
-                <p className="empty-text">暂无分类统计。</p>
-              ) : (
-                stats.byCategory.map((item) => (
-                  <div className="stat-row" key={item.id}>
-                    <span>{item.name}</span>
-                    <strong>{formatMinutes(item.minutes)}</strong>
-                  </div>
-                ))
-              )}
-            </div>
-            {topCategory ? (
-              <p className="insight-line">今日最高投入：{topCategory.name}</p>
-            ) : null}
-          </section>
-
-          <section className="quick-panel">
-            <div className="panel-title compact">
-              <p className="eyebrow">Habits</p>
-              <h3>快捷记录（点击即记）</h3>
-            </div>
-            <div className="quick-actions">
-              {quickRecordPresets.map((preset) => (
-                <button
-                  className="ghost-button quick-record-btn"
-                  type="button"
-                  key={preset.title}
-                  onClick={() => quickRecord(preset)}
-                  title={}
-                >
-                  {preset.title}
-                  <small>{preset.duration}min</small>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="review-output-panel">
-            <div className="panel-title compact">
-              <p className="eyebrow">Evening Review</p>
-              <h2>今日复盘</h2>
-            </div>
-            <article className="review-card" ref={reviewRef}>
-              <div className="review-topline">
-                <span>{review.date}</span>
-                <CircleDot size={18} aria-hidden="true" />
-              </div>
-              <h3>今日投入不是流水账，是明天的决策依据。</h3>
-              <div className="review-metrics">
-                <div>
-                  <span>总投入</span>
-                  <strong>{formatMinutes(review.totalMinutes)}</strong>
-                </div>
-                <div>
-                  <span>高价值资产</span>
-                  <strong>{assetRatio}%</strong>
-                </div>
-                <div>
-                  <span>注意力消耗</span>
-                  <strong>{drainRatio}%</strong>
-                </div>
-                <div>
-                  <span>完成任务</span>
-                  <strong>{review.completedTaskCount}</strong>
-                </div>
-              </div>
-              <div className="recommendation">
-                <span>明日建议行动</span>
-                <p>{review.recommendation}</p>
-              </div>
-            </article>
-
-            <div className="review-actions">
-              <button data-testid="save-review" type="button" onClick={saveTodayReview}>
-                <RefreshCw size={18} aria-hidden="true" />
-                保存
-              </button>
-              <button
-                className="ghost-button"
-                data-testid="export-png"
-                type="button"
-                onClick={exportReviewPng}
-              >
-                <Download size={18} aria-hidden="true" />
-                PNG
-              </button>
-            </div>
-            {data.reviews.length > 0 && (
-              <div className="review-history">
-                <p className="eyebrow">最近复盘</p>
-                {data.reviews.slice(0, 7).map((r) => (
-                  <div key={r.id} className="review-history-row">
-                    <span>{r.date}</span>
-                    <span>{formatMinutes(r.totalMinutes)}</span>
-                    <span>{r.completedTaskCount}项</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-        </aside>
-      </div>
-    {toast && (
-        <div className="toast-container">
-          <span>{toast}</span>
-          {undoAction && (
-            <button className="toast-undo" type="button" onClick={() => { undoAction(); setToast(null); setUndoAction(null); }}>
-              撤销
-            </button>
           )}
-        </div>
-      )}
-    
-      {/* ═══════════ Assets Page ═══════════ */}
-      {page === "assets" && (
-        <div className="assets-page">
-          {/* Left column: categories + projects */}
-          <aside className="assets-sidebar">
-            {/* Category editor */}
-            <section className="assets-section">
-              <div className="panel-title compact category-panel-header">
-                <div>
-                  <p className="eyebrow">Categories</p>
-                  <h3>资产分类</h3>
+
+          {/* ═══════════ 仪表盘页 ═══════════ */}
+          {page === "dashboard" && (
+            <div className="page-dashboard">
+              <div className="page-header">
+                <h2>仪表盘</h2>
+                <p className="text-soft">长期趋势总览</p>
+              </div>
+
+              {/* Key metrics row */}
+              <div className="dash-metrics">
+                <div className="dash-metric">
+                  <span>连续记录</span>
+                  <strong>{consecutiveDays} 天</strong>
                 </div>
-                <button
-                  className={`icon-button ${categoryEditMode ? "is-active" : ""}`}
-                  type="button"
-                  onClick={() => setCategoryEditMode((prev) => !prev)}
-                  aria-label="管理分类"
-                  title="管理分类"
-                >
-                  <Settings size={16} aria-hidden="true" />
-                </button>
-              </div>
-
-              {!categoryEditMode && (
-                <div className="filter-list">
-                  <button
-                    className={activeCategoryFilter === "all" ? "is-active" : ""}
-                    type="button"
-                    onClick={() => setActiveCategoryFilter("all")}
-                  >
-                    全部项目
-                  </button>
-                  {data.categories.map((category) => (
-                    <button
-                      className={activeCategoryFilter === category.name ? "is-active" : ""}
-                      type="button"
-                      key={category.id}
-                      onClick={() => setActiveCategoryFilter(category.name)}
-                    >
-                      <i style={{ "--tone": category.color }} />
-                      {category.name}
-                      {!category.isPositive && <span className="cat-tag">消耗</span>}
-                      {category.isPositive && <span className="cat-tag positive">资产</span>}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {categoryEditMode && (
-                <div className="category-edit-list">
-                  {data.categories.map((category, idx) => (
-                    <div className="category-edit-row" key={category.id}>
-                      <span className="cat-grip" title="拖拽排序">
-                        <GripVertical size={14} aria-hidden="true" />
-                      </span>
-                      <InlineCategoryEditor
-                        category={category}
-                        onSave={(updates) => updateCategory(category.id, updates)}
-                        onDelete={() => deleteCategory(category.id)}
-                        canDelete={data.categories.length > 1}
-                      />
-                    </div>
-                  ))}
-                  <form
-                    className="category-add-inline"
-                    onSubmit={(e) => { e.preventDefault(); addCategory(e); }}
-                  >
-                    <input
-                      value={categoryForm.name}
-                      onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })}
-                      placeholder="新分类名称"
-                      aria-label="新分类名称"
-                      className="cat-add-input"
-                    />
-                    <select
-                      value={categoryForm.kind}
-                      onChange={(e) => setCategoryForm({ ...categoryForm, kind: e.target.value })}
-                      className="cat-add-select"
-                    >
-                      <option value="asset">正向资产</option>
-                      <option value="maintenance">生存任务</option>
-                      <option value="drain">注意力消耗</option>
-                    </select>
-                    <button type="submit" className="icon-button" title="添加分类">
-                      <Plus size={14} aria-hidden="true" />
-                    </button>
-                  </form>
-                </div>
-              )}
-            </section>
-
-            {/* Project list */}
-            <section className="assets-section">
-              <div className="panel-title compact">
-                <p className="eyebrow">Projects</p>
-                <h3>项目列表</h3>
-              </div>
-              <div className="project-list" aria-label="项目列表">
-                {data.projects.length === 0 ? (
-                  <p className="empty-text">还没有项目。在下方创建第一个资产项目。</p>
-                ) : filteredProjects.length === 0 ? (
-                  <p className="empty-text">这个分类下还没有项目。</p>
-                ) : (
-                  filteredProjects.map((project) => (
-                    <div
-                      className={`project-row ${activeProject?.id === project.id ? "is-active" : ""}`}
-                      key={project.id}
-                    >
-                      <button
-                        className="project-select-button"
-                        type="button"
-                        onClick={() => setActiveProject(project.id)}
-                      >
-                        <span className="project-row-title">{project.name}</span>
-                        <span>{project.category}</span>
-                        <span className="progress-track" aria-label={`${project.name} 进度`}>
-                          <span style={{ width: `${project.progress}%` }} />
-                        </span>
-                        <strong>{project.progress}%</strong>
-                      </button>
-                      <button
-                        className="icon-button"
-                        type="button"
-                        onClick={() => deleteProject(project.id)}
-                        aria-label={`删除项目 ${project.name}`}
-                      >
-                        <Trash2 size={16} aria-hidden="true" />
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </section>
-
-            {/* New project form */}
-            <form className="stack-form compact-form" onSubmit={addProject} ref={projectFormRef}>
-              <div className="panel-title compact">
-                <p className="eyebrow">Create</p>
-                <h3>+ 新建项目</h3>
-              </div>
-              <input
-                data-testid="project-name"
-                value={projectForm.name}
-                onChange={(event) => setProjectForm({ ...projectForm, name: event.target.value })}
-                placeholder="新项目名称"
-                aria-label="新项目名称"
-              />
-              <textarea
-                data-testid="project-description"
-                value={projectForm.description}
-                onChange={(event) =>
-                  setProjectForm({ ...projectForm, description: event.target.value })
-                }
-                placeholder="一句话描述这个资产"
-                aria-label="项目描述"
-                rows={3}
-              />
-              <select
-                value={projectForm.category}
-                onChange={(event) =>
-                  setProjectForm({ ...projectForm, category: event.target.value })
-                }
-                aria-label="项目分类"
-              >
-                {data.categories.map((category) => (
-                  <option key={category.id} value={category.name}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
-              <button data-testid="add-project" type="submit">
-                <Plus size={18} aria-hidden="true" />
-                新建资产
-              </button>
-            </form>
-          </aside>
-
-          {/* Right column: backup + system */}
-          <div className="assets-main">
-            <section className="assets-section system-section">
-              <div className="panel-title compact">
-                <p className="eyebrow">System</p>
-                <h2>数据备份</h2>
-              </div>
-              <p style={{ fontSize: "0.82rem", color: "var(--text-soft)", marginBottom: "12px" }}>
-                数据只保存在本机浏览器，不会上传到任何服务器。建议定期导出备份。
-              </p>
-              <div className="backup-row" style={{ flexDirection: "column", alignItems: "flex-start", gap: "8px" }}>
-                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                  <button className="ghost-button" type="button" onClick={exportJson}>
-                    <FileDown size={16} aria-hidden="true" />
-                    导出 JSON
-                  </button>
-                  <label className="ghost-button file-button">
-                    <FileUp size={16} aria-hidden="true" />
-                    导入
-                    <input type="file" accept="application/json" onChange={importJson} />
-                  </label>
-                </div>
-                <button className="ghost-button danger-button" type="button" onClick={resetBrokenStorage}>
-                  重置本地数据
-                </button>
-              </div>
-              {importError ? <p style={{ color: "var(--danger)", fontSize: "0.8rem", marginTop: "8px" }}>{importError}</p> : null}
-            </section>
-
-            {/* Category chips overview */}
-            <section className="assets-section">
-              <div className="panel-title compact">
-                <p className="eyebrow">Overview</p>
-                <h3>当前分类</h3>
-              </div>
-              <div className="category-list">
-                {data.categories.map((category) => (
-                  <span
-                    className="category-chip"
-                    key={category.id}
-                    style={{ "--tone": category.color }}
-                  >
-                    <i />
-                    {category.name}
-                  </span>
-                ))}
-              </div>
-            </section>
-
-            {/* Quick stats */}
-            <section className="assets-section">
-              <div className="panel-title compact">
-                <p className="eyebrow">Stats</p>
-                <h3>项目总览</h3>
-              </div>
-              <div className="metric-grid">
-                <div>
-                  <Target size={18} aria-hidden="true" />
-                  <span>项目数</span>
+                <div className="dash-metric">
+                  <span>总项目</span>
                   <strong>{data.projects.length}</strong>
                 </div>
-                <div>
-                  <BarChart3 size={18} aria-hidden="true" />
-                  <span>总任务</span>
-                  <strong>{data.tasks.length}</strong>
+                <div className="dash-metric">
+                  <span>总记录</span>
+                  <strong>{data.events.length} 条</strong>
                 </div>
-                <div>
-                  <Lightbulb size={18} aria-hidden="true" />
-                  <span>想法</span>
-                  <strong>{data.ideas.length}</strong>
+                <div className="dash-metric">
+                  <span>累计时长</span>
+                  <strong>{formatMinutes(data.events.reduce((s, e) => s + e.duration, 0))}</strong>
                 </div>
               </div>
-            </section>
-          </div>
+
+              {/* 7-day net asset trend */}
+              <section className="work-card">
+                <div className="panel-title compact">
+                  <p className="eyebrow">Trend</p>
+                  <h3>近 7 天净资产趋势</h3>
+                </div>
+                {netAsset7Day.every((d) => d.net === 0) ? (
+                  <p className="empty-text">暂无数据。开始记录后会显示趋势。</p>
+                ) : (
+                  <div className="trend-bars">
+                    {netAsset7Day.map((d) => {
+                      const maxNet = Math.max(...netAsset7Day.map((x) => Math.abs(x.net)), 1);
+                      const heightPct = Math.min(100, Math.round((Math.abs(d.net) / maxNet) * 100));
+                      return (
+                        <div className="trend-bar-col" key={d.date}>
+                          <div className="trend-bar-value">{d.net > 0 ? "+" : ""}{d.net}min</div>
+                          <div className="trend-bar-wrap">
+                            <div
+                              className={`trend-bar ${d.net >= 0 ? "positive" : "negative"}`}
+                              style={{ height: `${Math.max(4, heightPct)}%` }}
+                            />
+                          </div>
+                          <div className="trend-bar-label">{d.label}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              {/* 30-day category cumulative */}
+              <section className="work-card">
+                <div className="panel-title compact">
+                  <p className="eyebrow">30 Days</p>
+                  <h3>各分类累计时长</h3>
+                </div>
+                {cat30Day.length === 0 ? (
+                  <p className="empty-text">近 30 天暂无记录。</p>
+                ) : (
+                  <div className="cat-distribution">
+                    {cat30Day.map((item) => {
+                      const cat = data.categories.find((c) => c.name === item.name);
+                      const maxMin = cat30Day[0]?.minutes || 1;
+                      const pct = Math.round((item.minutes / maxMin) * 100);
+                      return (
+                        <div className="dist-row" key={item.name}>
+                          <span className="dist-color" style={{ background: cat?.color || "#888" }} />
+                          <span className="dist-name">{item.name}</span>
+                          <span className="dist-bar-track">
+                            <span className="dist-bar-fill" style={{ width: `${pct}%`, background: cat?.color || "#888" }} />
+                          </span>
+                          <span className="dist-value">{formatMinutes(item.minutes)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              {/* Mainline asset */}
+              {mainlineCategory && (
+                <section className="work-card">
+                  <div className="panel-title compact">
+                    <p className="eyebrow">Mainline</p>
+                    <h3>当前主线资产</h3>
+                  </div>
+                  <div className="mainline-display">
+                    <span className="dist-color" style={{ background: mainlineCategory.color }} />
+                    <strong>{mainlineCategory.name}</strong>
+                    <span className="text-soft">{formatMinutes(cat30Day.find((c) => c.name === mainlineCategory.name)?.minutes || 0)} / 30天</span>
+                  </div>
+                </section>
+              )}
+
+              {/* Positive vs consumption ratio */}
+              <section className="work-card">
+                <div className="panel-title compact">
+                  <p className="eyebrow">Ratio</p>
+                  <h3>正向资产 / 消耗项比例</h3>
+                </div>
+                {(() => {
+                  const posTotal = cat30Day
+                    .filter((c) => data.categories.find((cat) => cat.name === c.name)?.isPositive)
+                    .reduce((s, c) => s + c.minutes, 0);
+                  const negTotal = cat30Day
+                    .filter((c) => !data.categories.find((cat) => cat.name === c.name)?.isPositive)
+                    .reduce((s, c) => s + c.minutes, 0);
+                  const total = posTotal + negTotal;
+                  const posPct = total > 0 ? Math.round((posTotal / total) * 100) : 0;
+                  return (
+                    <div className="ratio-display">
+                      <div className="ratio-bar">
+                        <span className="ratio-pos" style={{ width: `${posPct}%` }}>{posPct > 10 ? `${posPct}%` : ""}</span>
+                        <span className="ratio-neg" style={{ width: `${100-posPct}%` }}>{posPct < 90 ? `${100-posPct}%` : ""}</span>
+                      </div>
+                      <div className="ratio-labels">
+                        <span>正向 {formatMinutes(posTotal)}</span>
+                        <span>消耗 {formatMinutes(negTotal)}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </section>
+            </div>
+          )}
+{/* PAGES WILL BE INSERTED HERE */}
+        </div>
+      </div>
+      {toast && (
+        <div className="toast-container">
+          <span>{toast}</span>
+          {undoAction && (<button className="toast-undo" type="button" onClick={() => { undoAction(); setToast(null); setUndoAction(null); }}>撤销</button>)}
         </div>
       )}
-
-      </>
-      )}
-</main>
+    </main>
   );
 }
 
