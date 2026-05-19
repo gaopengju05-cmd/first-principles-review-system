@@ -504,14 +504,18 @@ function App() {
 
   // Task handlers
   const [taskForm, setTaskForm] = useState("");
+  const [taskProjectId, setTaskProjectId] = useState("");
   const addTask = (e) => {
     e.preventDefault();
     const title = taskForm.trim();
-    if (!title || !activeProject) return;
-    const task = { id: makeId("task"), projectId: activeProject.id, title,
+    if (!title) return;
+    const pid = taskProjectId || activeProject?.id || null;
+    const task = { id: makeId("task"), projectId: pid, title,
       completed: false, createdAt: nowIso(), completedAt: null, fromIdeaId: null };
     updateData((c) => ({ ...c, tasks: [task, ...c.tasks] }));
     setTaskForm("");
+    setTaskProjectId("");
+    showToast(`已创建任务「${title}」`);
   };
   const toggleTask = (id) => {
     updateData((c) => ({
@@ -907,6 +911,27 @@ function App() {
           <>
             <h1 className="page-title">任务</h1>
             <p className="page-subtitle">{data.tasks.length} 个任务 · {data.tasks.filter((t) => !t.completed).length} 个待完成</p>
+
+            {/* Quick create task */}
+            <form className="inline-form" onSubmit={addTask} style={{ gridTemplateColumns: "1fr auto auto", gap: 8, marginBottom: 16 }}>
+              <input
+                value={taskForm}
+                onChange={(e) => setTaskForm(e.target.value)}
+                placeholder="新增任务（如：复习线性代数第三章）"
+              />
+              <select
+                value={taskProjectId}
+                onChange={(e) => setTaskProjectId(e.target.value)}
+                style={{ minWidth: 130 }}
+              >
+                <option value="">不关联项目</option>
+                {data.projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <button className="btn-primary" type="submit"><Plus size={14} />创建</button>
+            </form>
+
             <div className="task-tabs">
               {[
                 { key: "all", label: "全部" },
