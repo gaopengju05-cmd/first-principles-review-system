@@ -465,6 +465,264 @@ const getPageFromURL = () => {
   return PAGES.includes(p) ? p : "record";
 };
 
+
+// ═══════════ Canvas Chart Components ═══════════
+
+const COLORS = {
+  blue: "#7f90ff",
+  green: "#8fe3cf",
+  red: "#ff8fab",
+  amber: "#f6d365",
+  bg: "#10111f",
+  text: "#f6f7fb",
+  textSoft: "#97a0b8",
+  line: "rgba(214,223,255,0.11)",
+  grid: "rgba(214,223,255,0.05)",
+};
+
+const DashboardBarChart = ({ data, categories }) => {
+  const ref = useRef(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas || data.length === 0) return;
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const w = rect.width;
+    const h = 200;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + "px";
+    canvas.style.height = h + "px";
+    ctx.scale(dpr, dpr);
+
+    ctx.clearRect(0, 0, w, h);
+    const pad = { top: 10, right: 16, bottom: 28, left: 40 };
+    const cw = w - pad.left - pad.right;
+    const ch = h - pad.top - pad.bottom;
+    const maxVal = Math.max(...data.map((d) => d.minutes), 1);
+    const barW = Math.max(8, Math.min(36, (cw / data.length) * 0.6));
+    const gap = cw / data.length;
+
+    // Grid lines
+    ctx.strokeStyle = COLORS.grid;
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = pad.top + (ch / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(pad.left, y);
+      ctx.lineTo(w - pad.right, y);
+      ctx.stroke();
+      ctx.fillStyle = COLORS.textSoft;
+      ctx.font = "10px Inter, sans-serif";
+      ctx.textAlign = "right";
+      ctx.fillText(Math.round(maxVal - (maxVal / 4) * i) + "", pad.left - 6, y + 4);
+    }
+
+    // Bars
+    data.forEach((d, i) => {
+      const cat = categories.find((c) => c.name === d.name);
+      const barH = (d.minutes / maxVal) * ch;
+      const x = pad.left + gap * i + (gap - barW) / 2;
+      const y = pad.top + ch - barH;
+      const color = cat?.color || COLORS.blue;
+
+      // Gradient bar
+      const grad = ctx.createLinearGradient(x, y, x, pad.top + ch);
+      grad.addColorStop(0, color);
+      grad.addColorStop(1, color + "44");
+      ctx.fillStyle = grad;
+
+      // Rounded top
+      const r = Math.min(4, barW / 2);
+      ctx.beginPath();
+      ctx.moveTo(x, pad.top + ch);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.lineTo(x + barW - r, y);
+      ctx.quadraticCurveTo(x + barW, y, x + barW, y + r);
+      ctx.lineTo(x + barW, pad.top + ch);
+      ctx.closePath();
+      ctx.fill();
+
+      // Value label on top
+      ctx.fillStyle = COLORS.text;
+      ctx.font = "bold 10px Inter, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(d.minutes + "", x + barW / 2, y - 4);
+
+      // Category label
+      ctx.fillStyle = COLORS.textSoft;
+      ctx.font = "9px Inter, sans-serif";
+      ctx.fillText(d.name.length > 4 ? d.name.slice(0, 4) + ".." : d.name, x + barW / 2, pad.top + ch + 16);
+    });
+  }, [data, categories]);
+
+  return <canvas ref={ref} style={{ width: "100%", height: 200 }} />;
+};
+
+const DashboardLineChart = ({ data }) => {
+  const ref = useRef(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas || data.length === 0) return;
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const w = rect.width;
+    const h = 200;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + "px";
+    canvas.style.height = h + "px";
+    ctx.scale(dpr, dpr);
+
+    ctx.clearRect(0, 0, w, h);
+    const pad = { top: 10, right: 16, bottom: 28, left: 40 };
+    const cw = w - pad.left - pad.right;
+    const ch = h - pad.top - pad.bottom;
+    const maxVal = Math.max(...data.map((d) => d.minutes), 1);
+    const stepX = data.length > 1 ? cw / (data.length - 1) : cw;
+
+    // Grid
+    ctx.strokeStyle = COLORS.grid;
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = pad.top + (ch / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(pad.left, y);
+      ctx.lineTo(w - pad.right, y);
+      ctx.stroke();
+      ctx.fillStyle = COLORS.textSoft;
+      ctx.font = "10px Inter, sans-serif";
+      ctx.textAlign = "right";
+      ctx.fillText(Math.round(maxVal - (maxVal / 4) * i) + "", pad.left - 6, y + 4);
+    }
+
+    // Gradient fill
+    const points = data.map((d, i) => ({
+      x: pad.left + stepX * i,
+      y: pad.top + ch - (d.minutes / maxVal) * ch,
+    }));
+
+    // Fill area
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, pad.top + ch);
+    points.forEach((p) => ctx.lineTo(p.x, p.y));
+    ctx.lineTo(points[points.length - 1].x, pad.top + ch);
+    ctx.closePath();
+    const gradFill = ctx.createLinearGradient(0, pad.top, 0, pad.top + ch);
+    gradFill.addColorStop(0, "rgba(127,144,255,0.25)");
+    gradFill.addColorStop(1, "rgba(127,144,255,0.02)");
+    ctx.fillStyle = gradFill;
+    ctx.fill();
+
+    // Line
+    ctx.strokeStyle = COLORS.blue;
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    points.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+    ctx.stroke();
+
+    // Dots
+    points.forEach((p) => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = COLORS.bg;
+      ctx.fill();
+      ctx.strokeStyle = COLORS.blue;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = COLORS.text;
+      ctx.font = "bold 10px Inter, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(data[points.indexOf(p)].minutes + "", p.x, p.y - 10);
+    });
+
+    // X labels
+    ctx.fillStyle = COLORS.textSoft;
+    ctx.font = "9px Inter, sans-serif";
+    ctx.textAlign = "center";
+    points.forEach((p, i) => {
+      if (data.length > 4 && i % 2 !== 0 && i !== data.length - 1) return;
+      ctx.fillText(data[i].label, p.x, pad.top + ch + 16);
+    });
+  }, [data]);
+
+  return <canvas ref={ref} style={{ width: "100%", height: 200 }} />;
+};
+
+const DashboardPieChart = ({ posMinutes, drainMinutes }) => {
+  const ref = useRef(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const size = 180;
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    canvas.style.width = size + "px";
+    canvas.style.height = size + "px";
+    ctx.scale(dpr, dpr);
+
+    ctx.clearRect(0, 0, size, size);
+    const cx = size / 2;
+    const cy = size / 2;
+    const r = 70;
+    const total = posMinutes + drainMinutes || 1;
+    const posAngle = (posMinutes / total) * Math.PI * 2;
+    const drainAngle = (drainMinutes / total) * Math.PI * 2;
+
+    // Drain slice
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + drainAngle);
+    ctx.closePath();
+    ctx.fillStyle = COLORS.red + "88";
+    ctx.fill();
+
+    // Pos slice
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, -Math.PI / 2 + drainAngle, -Math.PI / 2 + Math.PI * 2);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+    grad.addColorStop(0, COLORS.green + "cc");
+    grad.addColorStop(1, COLORS.blue + "aa");
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Center hole (donut style)
+    ctx.beginPath();
+    ctx.arc(cx, cy, 35, 0, Math.PI * 2);
+    ctx.fillStyle = COLORS.bg;
+    ctx.fill();
+
+    // Center text
+    ctx.fillStyle = COLORS.text;
+    ctx.font = "bold 14px Inter, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const posPct = Math.round((posMinutes / total) * 100);
+    ctx.fillText(posPct + "%", cx, cy - 4);
+    ctx.fillStyle = COLORS.textSoft;
+    ctx.font = "9px Inter, sans-serif";
+    ctx.fillText("正向", cx, cy + 12);
+  }, [posMinutes, drainMinutes]);
+
+  return (
+    <div className="dash-pie-wrap">
+      <canvas ref={ref} width={180} height={180} />
+      <div className="dash-pie-legend">
+        <span><i style={{ background: COLORS.green }} />正向 {formatMinutes(posMinutes)}</span>
+        <span><i style={{ background: COLORS.red }} />消耗 {formatMinutes(drainMinutes)}</span>
+      </div>
+    </div>
+  );
+};
+
 function App() {
   const [page, setPage] = useState(getPageFromURL);
   const [data, setData] = useState(loadReviewData);
@@ -496,6 +754,7 @@ function App() {
   });
   const [categoryForm, setCategoryForm] = useState({ name: "", kind: "asset", type: "growth", color: "#c4b5fd" });
   const [activeCategoryFilter, setActiveCategoryFilter] = useState("all");
+  const [dashTimeFilter, setDashTimeFilter] = useState("all"); // today | week | month | all
   const [conversionTargets, setConversionTargets] = useState({});
   const [importError, setImportError] = useState("");
   const [schedule, setSchedule] = useState(() => {
@@ -1007,6 +1266,63 @@ function App() {
       .sort((a, b) => b.minutes - a.minutes);
   })();
 
+  // ═══════ Dashboard stats (time-filtered) ═══════
+  const dashStats = useMemo(() => {
+    const today = new Date();
+    const todayKey = localDateKey();
+    let cutoff = null;
+    if (dashTimeFilter === "today") {
+      cutoff = new Date(today); cutoff.setHours(0,0,0,0);
+    } else if (dashTimeFilter === "week") {
+      cutoff = new Date(today); cutoff.setDate(cutoff.getDate() - 7);
+    } else if (dashTimeFilter === "month") {
+      cutoff = new Date(today); cutoff.setDate(cutoff.getDate() - 30);
+    }
+    const filtered = cutoff
+      ? data.events.filter((e) => new Date(e.createdAt) >= cutoff)
+      : data.events;
+
+    // Total
+    const totalMinutes = filtered.reduce((s, e) => s + e.duration, 0);
+    const recordCount = filtered.length;
+
+    // By category
+    const catMap = {};
+    filtered.forEach((e) => {
+      catMap[e.category] = (catMap[e.category] || 0) + e.duration;
+    });
+    const byCategory = Object.entries(catMap)
+      .map(([name, minutes]) => ({ name, minutes }))
+      .sort((a, b) => b.minutes - a.minutes);
+
+    // Positive vs drain
+    const posMinutes = filtered.reduce((s, e) => {
+      const cat = data.categories.find((c) => c.name === e.category);
+      return cat && cat.isPositive ? s + e.duration : s;
+    }, 0);
+    const drainMinutes = filtered.reduce((s, e) => {
+      const cat = data.categories.find((c) => c.name === e.category);
+      return cat && !cat.isPositive ? s + e.duration : s;
+    }, 0);
+
+    // Daily trend (last 7 days)
+    const trend7Day = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const key = localDateKey(d);
+      const dayTotal = filtered.filter((e) => localDateKey(e.createdAt) === key).reduce((s, e) => s + e.duration, 0);
+      trend7Day.push({ date: key, label: `${d.getMonth()+1}/${d.getDate()}`, minutes: dayTotal });
+    }
+
+    // Recent records (last 10)
+    const recentRecords = filtered
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 8);
+
+    return { totalMinutes, recordCount, byCategory, posMinutes, drainMinutes, trend7Day, recentRecords };
+  }, [data.events, dashTimeFilter, data.categories]);
+
   // Mainline asset (category marked as current phase focus)
   const mainlineCategory = data.categories.find((c) => c.type === "growth" && c.isPositive) || data.categories.find((c) => c.isPositive);
   const filteredProjects =
@@ -1272,135 +1588,131 @@ function App() {
             <div className="page-dashboard">
               <div className="page-header">
                 <h2>仪表盘</h2>
-                <p className="text-soft">长期趋势总览</p>
+                <p className="text-soft">数据驱动的时间资产管理</p>
               </div>
 
-              {/* Key metrics row */}
+              {/* Time filter */}
+              <div className="dash-filter-bar">
+                {[
+                  { key: "today", label: "今天" },
+                  { key: "week", label: "本周" },
+                  { key: "month", label: "本月" },
+                  { key: "all", label: "全部" },
+                ].map((f) => (
+                  <button
+                    key={f.key}
+                    className={`dash-filter-btn ${dashTimeFilter === f.key ? "is-active" : ""}`}
+                    type="button"
+                    onClick={() => setDashTimeFilter(f.key)}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* KPI cards */}
               <div className="dash-metrics">
                 <div className="dash-metric">
-                  <span>连续记录到今天</span>
-                  <strong>{consecutiveDays} 天</strong>
+                  <span>总投入时间</span>
+                  <strong>{formatMinutes(dashStats.totalMinutes)}</strong>
+                </div>
+                <div className="dash-metric positive">
+                  <span>正向资产</span>
+                  <strong>{formatMinutes(dashStats.posMinutes)}</strong>
+                </div>
+                <div className="dash-metric negative">
+                  <span>注意力消耗</span>
+                  <strong>{formatMinutes(dashStats.drainMinutes)}</strong>
                 </div>
                 <div className="dash-metric">
-                  <span>最近记录日</span>
-                  <strong>{(() => { const dates = [...new Set(data.events.map((e) => localDateKey(e.createdAt)))].sort().reverse(); return dates[0] || "暂无"; })()}</strong>
-                </div>
-                <div className="dash-metric">
-                  <span>总项目</span>
-                  <strong>{data.projects.length}</strong>
-                </div>
-                <div className="dash-metric">
-                  <span>累计时长</span>
-                  <strong>{formatMinutes(data.events.reduce((s, e) => s + e.duration, 0))}</strong>
+                  <span>记录条数</span>
+                  <strong>{dashStats.recordCount}</strong>
                 </div>
               </div>
 
-              {/* 7-day net asset trend */}
-              <section className="work-card">
-                <div className="panel-title compact">
-                  <p className="eyebrow">Trend</p>
-                  <h3>近 7 天净资产趋势</h3>
-                  <p className="trend-legend">正向资产分钟数 − 注意力消耗分钟数。绿色为正，红色为负。</p>
-                </div>
-                {netAsset7Day.every((d) => d.net === 0) ? (
-                  <p className="empty-text">暂无数据。开始记录后会显示趋势。</p>
-                ) : (
-                  <div className="trend-bars">
-                    {netAsset7Day.map((d) => {
-                      const maxNet = Math.max(...netAsset7Day.map((x) => Math.abs(x.net)), 1);
-                      const heightPct = Math.min(100, Math.round((Math.abs(d.net) / maxNet) * 100));
-                      return (
-                        <div className="trend-bar-col" key={d.date}>
-                          <div className="trend-bar-value">{d.net > 0 ? "+" : ""}{d.net}min</div>
-                          <div className="trend-bar-wrap">
-                            <div
-                              className={`trend-bar ${d.net >= 0 ? "positive" : "negative"}`}
-                              style={{ height: `${Math.max(4, heightPct)}%` }}
-                            />
-                          </div>
-                          <div className="trend-bar-label">{d.label}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </section>
-
-              {/* 30-day category cumulative */}
-              <section className="work-card">
-                <div className="panel-title compact">
-                  <p className="eyebrow">30 Days</p>
-                  <h3>各分类累计时长</h3>
-                </div>
-                {cat30Day.length === 0 ? (
-                  <p className="empty-text">近 30 天暂无记录。</p>
-                ) : (
-                  <div className="cat-distribution">
-                    {cat30Day.map((item) => {
-                      const cat = data.categories.find((c) => c.name === item.name);
-                      const maxMin = cat30Day[0]?.minutes || 1;
-                      const pct = Math.round((item.minutes / maxMin) * 100);
-                      return (
-                        <div className="dist-row" key={item.name}>
-                          <span className="dist-color" style={{ background: cat?.color || "#888" }} />
-                          <span className="dist-name">{item.name}</span>
-                          <span className="dist-bar-track">
-                            <span className="dist-bar-fill" style={{ width: `${pct}%`, background: cat?.color || "#888" }} />
-                          </span>
-                          <span className="dist-value">{formatMinutes(item.minutes)}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </section>
-
-              {/* Mainline asset */}
-              {mainlineCategory && (
-                <section className="work-card">
+              {/* Charts row */}
+              <div className="dash-charts-row">
+                {/* Category bar chart */}
+                <section className="dash-chart-card">
                   <div className="panel-title compact">
-                    <p className="eyebrow">Mainline</p>
-                    <h3>当前主线资产</h3>
+                    <p className="eyebrow">Distribution</p>
+                    <h3>分类投入分布</h3>
                   </div>
-                  <div className="mainline-display">
-                    <span className="dist-color" style={{ background: mainlineCategory.color }} />
-                    <strong>{mainlineCategory.name}</strong>
-                    <span className="text-soft">{formatMinutes(cat30Day.find((c) => c.name === mainlineCategory.name)?.minutes || 0)} / 30天</span>
+                  <div className="dash-chart-body">
+                    {dashStats.byCategory.length > 0 ? (
+                      <DashboardBarChart data={dashStats.byCategory} categories={data.categories} />
+                    ) : (
+                      <p className="empty-text">暂无数据</p>
+                    )}
                   </div>
                 </section>
-              )}
 
-              {/* Positive vs consumption ratio */}
-              <section className="work-card">
-                <div className="panel-title compact">
-                  <p className="eyebrow">Ratio</p>
-                  <h3>正向资产 / 消耗项比例</h3>
-                </div>
-                {(() => {
-                  const posTotal = cat30Day
-                    .filter((c) => data.categories.find((cat) => cat.name === c.name)?.isPositive)
-                    .reduce((s, c) => s + c.minutes, 0);
-                  const negTotal = cat30Day
-                    .filter((c) => !data.categories.find((cat) => cat.name === c.name)?.isPositive)
-                    .reduce((s, c) => s + c.minutes, 0);
-                  const total = posTotal + negTotal;
-                  const posPct = total > 0 ? Math.round((posTotal / total) * 100) : 0;
-                  return (
-                    <div className="ratio-display">
-                      <div className="ratio-bar">
-                        <span className="ratio-pos" style={{ width: `${posPct}%` }}>{posPct > 10 ? `${posPct}%` : ""}</span>
-                        <span className="ratio-neg" style={{ width: `${100-posPct}%` }}>{posPct < 90 ? `${100-posPct}%` : ""}</span>
+                {/* 7-day trend line chart */}
+                <section className="dash-chart-card">
+                  <div className="panel-title compact">
+                    <p className="eyebrow">Trend</p>
+                    <h3>近 7 天投入趋势</h3>
+                  </div>
+                  <div className="dash-chart-body">
+                    {dashStats.trend7Day.some((d) => d.minutes > 0) ? (
+                      <DashboardLineChart data={dashStats.trend7Day} />
+                    ) : (
+                      <p className="empty-text">暂无数据</p>
+                    )}
+                  </div>
+                </section>
+              </div>
+
+              {/* Second row: pie chart + recent records */}
+              <div className="dash-charts-row">
+                {/* Pie chart */}
+                <section className="dash-chart-card">
+                  <div className="panel-title compact">
+                    <p className="eyebrow">Ratio</p>
+                    <h3>正向 / 消耗比例</h3>
+                  </div>
+                  <div className="dash-chart-body">
+                    {(dashStats.posMinutes > 0 || dashStats.drainMinutes > 0) ? (
+                      <DashboardPieChart posMinutes={dashStats.posMinutes} drainMinutes={dashStats.drainMinutes} />
+                    ) : (
+                      <p className="empty-text">暂无数据</p>
+                    )}
+                  </div>
+                </section>
+
+                {/* Recent records */}
+                <section className="dash-chart-card">
+                  <div className="panel-title compact">
+                    <p className="eyebrow">Recent</p>
+                    <h3>最近记录</h3>
+                  </div>
+                  <div className="dash-chart-body">
+                    {dashStats.recentRecords.length > 0 ? (
+                      <div className="dash-recent-list">
+                        {dashStats.recentRecords.map((ev) => {
+                          const cat = data.categories.find((c) => c.name === ev.category);
+                          const proj = data.projects.find((p) => p.id === ev.projectId);
+                          return (
+                            <div className="dash-recent-row" key={ev.id}>
+                              <span className="dash-recent-swatch" style={{ background: cat?.color || "#888" }} />
+                              <div className="dash-recent-info">
+                                <strong>{ev.title}</strong>
+                                <small>{ev.category}{proj ? " · " + proj.name : ""} · {localDateKey(ev.createdAt)}</small>
+                              </div>
+                              <b>{formatMinutes(ev.duration)}</b>
+                            </div>
+                          );
+                        })}
                       </div>
-                      <div className="ratio-labels">
-                        <span>正向 {formatMinutes(posTotal)}</span>
-                        <span>消耗 {formatMinutes(negTotal)}</span>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </section>
+                    ) : (
+                      <p className="empty-text">暂无记录</p>
+                    )}
+                  </div>
+                </section>
+              </div>
             </div>
           )}
+
           {/* ═══════════ 资产定义页 ═══════════ */}
           {page === "assets" && (
             <div className="page-assets">
