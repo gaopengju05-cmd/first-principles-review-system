@@ -786,6 +786,14 @@ function App() {
   const [activeCategoryFilter, setActiveCategoryFilter] = useState("all");
   const [dashTimeFilter, setDashTimeFilter] = useState("week"); // today | week | month | all
   const [dashCatFilter, setDashCatFilter] = useState("all"); // all or category name
+
+  // ── AI Journal Parse State ──────────────────
+  const [aiJournalText, setAiJournalText] = useState("");
+  const [aiParsing, setAiParsing] = useState(false);
+  const [aiRecords, setAiRecords] = useState(null); // parsed records array
+  const [aiError, setAiError] = useState(null);
+  const [aiTab, setAiTab] = useState("manual"); // "manual" | "ai"
+  const AI_PROXY_URL = "https://lifeos-proxy.gaopengju.workers.dev/api/parse-journal";
   const [conversionTargets, setConversionTargets] = useState({});
   const [importError, setImportError] = useState("");
   const [schedule, setSchedule] = useState(() => {
@@ -1074,6 +1082,96 @@ function App() {
       ...current,
       events: current.events.filter((item) => item.id !== eventId),
     }));
+  };
+
+  // ── AI Journal Parse ─────────────────────────
+  const parseJournalWithAI = async () => {
+    const text = aiJournalText.trim();
+    if (!text) return;
+    setAiParsing(true);
+    setAiError(null);
+    setAiRecords(null);
+    try {
+      const resp = await fetch(AI_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          categories: data.categories.map((c) => ({ name: c.name })),
+          projects: data.projects.map((p) => ({ name: p.name })),
+          tasks: data.tasks,
+        }),
+      });
+      const result = await resp.json();
+      if (!resp.ok) {
+        throw new Error(result.error || "AI 服务异常");
+      }
+      const records = (result.records || []).map((r, idx) => ({
+        ...r,
+        _key: idx,
+        title: r.title || "",
+        duration: Math.max(1, Math.round(Number(r.duration) || 30)),
+        category: r.category || data.categories[0]?.name || "学业资产",
+        project: r.project || null,
+        note: r.note || "",
+        confidence: r.confidence || "medium",
+      }));
+      if (records.length === 0) {
+        setAiError("没能从这段文字中解析出记录，试试写得更具体一些？");
+      } else {
+        setAiRecords(records);
+      }
+    } catch (err) {
+      console.error("AI parse error:", err);
+      setAiError(err.message || "AI 解析失败，请检查网络后重试");
+    } finally {
+      setAiParsing(false);
+    }
+  };
+
+  const confirmAiRecords = () => {
+    if (!aiRecords || aiRecords.length === 0) return;
+    const catMap = new Map(data.categories.map((c) => [c.name, c]));
+    const projMap = new Map(data.projects.map((p) => [p.name, p]));
+    const newEvents = aiRecords.map((r) => {
+      const cat = catMap.get(r.category);
+      const proj = r.project ? projMap.get(r.project) : null;
+      return {
+        id: makeId("event"),
+        title: r.title,
+        duration: r.duration,
+        category: cat ? cat.name : (data.categories[0]?.name || "学业资产"),
+        projectId: proj?.id || (activeProject?.id || (data.projects[0]?.id || null)),
+        createdAt: nowIso(),
+      };
+    });
+    updateData((current) => ({
+      ...current,
+      events: [...newEvents, ...current.events],
+    }));
+    const toastMsg = `✅ 已写入 ${newEvents.length} 条记录`;
+    showToast(toastMsg, () => {
+      updateData((current) => ({
+        ...current,
+        events: current.events.filter((e) => !newEvents.some((ne) => ne.id === e.id)),
+      }));
+    });
+    setAiJournalText("");
+    setAiRecords(null);
+    setAiError(null);
+  };
+
+  const updateAiRecord = (idx, field, value) => {
+    if (!aiRecords) return;
+    const next = [...aiRecords];
+    next[idx] = { ...next[idx], [field]: value };
+    setAiRecords(next);
+  };
+
+  const deleteAiRecord = (idx) => {
+    if (!aiRecords) return;
+    const next = aiRecords.filter((_, i) => i !== idx);
+    setAiRecords(next.length > 0 ? next : null);
   };
 
   const addCategory = (event) => {
@@ -1437,47 +1535,176 @@ function App() {
               </section>
 
               {/* Manual record form */}
-              {/* Record entry — AI temporarily disabled */}
+                            {/* Record entry — Dual Tab */}
               <section className="work-card">
                 <div className="panel-title compact">
                   <p className="eyebrow">Record</p>
                   <h3>今天做了什么？</h3>
                 </div>
                 <div className="record-tabs">
-                  <button className="record-tab is-active" type="button">手动记录</button>
-                  <button className="record-tab is-disabled" type="button" disabled>AI 流水账（升级中）</button>
-                </div>
-                <form className="stack-form compact-form" onSubmit={addEvent} style={{ marginTop: 0 }}>
-                  <input
-                    data-testid="event-title"
-                    value={eventForm.title}
-                    onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
-                    placeholder="做了什么（如：上午学 React 2h）"
-                    aria-label="事件标题"
-                  />
-                  <div className="two-columns">
-                    <input
-                      data-testid="event-duration"
-                      type="number" min="1" step="1"
-                      value={eventForm.duration}
-                      onChange={(e) => setEventForm({ ...eventForm, duration: e.target.value })}
-                      placeholder="分钟"
-                      aria-label="事件时长"
-                    />
-                    <select
-                      value={eventForm.category}
-                      onChange={(e) => setEventForm({ ...eventForm, category: e.target.value })}
-                      aria-label="事件分类"
-                    >
-                      {data.categories.map((cat) => (
-                        <option key={cat.id} value={cat.name}>{cat.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <button data-testid="add-event" type="submit">
-                    <Plus size={18} aria-hidden="true" />添加记录
+                  <button
+                    className={`record-tab ${aiTab === "manual" ? "is-active" : ""}`}
+                    type="button"
+                    onClick={() => { setAiTab("manual"); setAiRecords(null); setAiError(null); }}
+                  >
+                    手动记录
                   </button>
-                </form>
+                  <button
+                    className={`record-tab ${aiTab === "ai" ? "is-active" : ""}`}
+                    type="button"
+                    onClick={() => setAiTab("ai")}
+                  >
+                    AI 流水账
+                  </button>
+                </div>
+
+                {aiTab === "manual" && (
+                  <form className="stack-form compact-form" onSubmit={addEvent} style={{ marginTop: 0 }}>
+                    <input
+                      data-testid="event-title"
+                      value={eventForm.title}
+                      onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
+                      placeholder="做了什么（如：上午学 React 2h）"
+                      aria-label="事件标题"
+                    />
+                    <div className="two-columns">
+                      <input
+                        data-testid="event-duration"
+                        type="number" min="1" step="1"
+                        value={eventForm.duration}
+                        onChange={(e) => setEventForm({ ...eventForm, duration: e.target.value })}
+                        placeholder="分钟"
+                        aria-label="事件时长"
+                      />
+                      <select
+                        value={eventForm.category}
+                        onChange={(e) => setEventForm({ ...eventForm, category: e.target.value })}
+                        aria-label="事件分类"
+                      >
+                        {data.categories.map((cat) => (
+                          <option key={cat.id} value={cat.name}>{cat.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <button data-testid="add-event" type="submit">
+                      <Plus size={18} aria-hidden="true" />添加记录
+                    </button>
+                  </form>
+                )}
+
+                {aiTab === "ai" && (
+                  <div className="ai-journal-area">
+                    <textarea
+                      className="ai-journal-input"
+                      value={aiJournalText}
+                      onChange={(e) => setAiJournalText(e.target.value)}
+                      placeholder="写流水账，让 LifeOS 帮你整理。&#10;比如：上午学了2小时 React，下午健身1小时，晚上看了会书"
+                      rows={4}
+                      disabled={aiParsing}
+                    />
+                    <button
+                      className="ai-journal-btn"
+                      type="button"
+                      onClick={parseJournalWithAI}
+                      disabled={aiParsing || !aiJournalText.trim()}
+                    >
+                      {aiParsing ? (
+                        <><span className="ai-pulse" />整理中…</>
+                      ) : (
+                        "让 LifeOS 整理"
+                      )}
+                    </button>
+
+                    {/* AI Error */}
+                    {aiError && (
+                      <div className="ai-error-banner">
+                        <p>{aiError}</p>
+                      </div>
+                    )}
+
+                    {/* AI Result Cards */}
+                    {aiRecords && aiRecords.length > 0 && (
+                      <div className="ai-records-panel">
+                        <div className="ai-records-header">
+                          <span>解析出 {aiRecords.length} 条记录</span>
+                          <span className="ai-records-hint">逐条检查后确认写入</span>
+                        </div>
+                        <div className="ai-records-list">
+                          {aiRecords.map((rec, idx) => {
+                            const confColors = { high: "var(--blue)", medium: "var(--amber)", low: "var(--text-faint)" };
+                            const confLabels = { high: "高置信", medium: "推断", low: "待确认" };
+                            return (
+                              <div className={`ai-record-card confidence-${rec.confidence}`} key={rec._key}>
+                                <div className="ai-card-top">
+                                  <span className="ai-confidence-tag" style={{ borderColor: confColors[rec.confidence], color: confColors[rec.confidence] }}>
+                                    {confLabels[rec.confidence]}
+                                  </span>
+                                  <button className="icon-button" type="button" onClick={() => deleteAiRecord(idx)} title="移除此条">
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                                <input
+                                  className="ai-card-title"
+                                  value={rec.title}
+                                  onChange={(e) => updateAiRecord(idx, "title", e.target.value)}
+                                  placeholder="记录标题"
+                                />
+                                <div className="ai-card-fields">
+                                  <div className="ai-card-field">
+                                    <label>时长</label>
+                                    <input
+                                      type="number" min="1"
+                                      value={rec.duration}
+                                      onChange={(e) => updateAiRecord(idx, "duration", Number(e.target.value))}
+                                    />
+                                    <span className="ai-field-unit">分钟</span>
+                                  </div>
+                                  <div className="ai-card-field">
+                                    <label>分类</label>
+                                    <select
+                                      value={rec.category}
+                                      onChange={(e) => updateAiRecord(idx, "category", e.target.value)}
+                                    >
+                                      {data.categories.map((cat) => (
+                                        <option key={cat.id} value={cat.name}>{cat.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div className="ai-card-field">
+                                    <label>项目</label>
+                                    <select
+                                      value={rec.project || ""}
+                                      onChange={(e) => updateAiRecord(idx, "project", e.target.value || null)}
+                                    >
+                                      <option value="">不关联</option>
+                                      {data.projects.map((p) => (
+                                        <option key={p.id} value={p.name}>{p.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+                                <input
+                                  className="ai-card-note"
+                                  value={rec.note || ""}
+                                  onChange={(e) => updateAiRecord(idx, "note", e.target.value)}
+                                  placeholder="备注（可选）"
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="ai-records-actions">
+                          <button className="ai-confirm-btn" type="button" onClick={confirmAiRecords}>
+                            <Check size={18} />确认写入今日记录
+                          </button>
+                          <button className="ghost-button" type="button" onClick={() => { setAiRecords(null); setAiError(null); }}>
+                            取消
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </section>
 
 
