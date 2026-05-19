@@ -149,6 +149,204 @@ const getCategory = (cats, name) => cats.find((c) => c.name === name) || cats[0]
 
 const PAGES = ["today","projects","tasks","review","dashboard","assets","backup"];
 
+
+/* ══════════════════════════════════════════════
+   Canvas Chart Components
+   ══════════════════════════════════════════════ */
+
+const CHART_COLORS = {
+  blue: "#A78BFA", green: "#34D399", red: "#FB7185", amber: "#FBBF24",
+  grid: "rgba(255,255,255,0.04)", textSoft: "#6B7280",
+};
+
+const DashboardBarChart = ({ data, categories, onBarClick, activeCategory }) => {
+  const ref = useRef(null);
+  const barRects = useRef([]);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas || !data.length) return;
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const w = rect.width, h = 200;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    canvas.style.width = w + "px"; canvas.style.height = h + "px";
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+    const pad = { top: 10, right: 16, bottom: 28, left: 36 };
+    const cw = w - pad.left - pad.right, ch = h - pad.top - pad.bottom;
+    const maxVal = Math.max(...data.map((d) => d.minutes), 1);
+    const barW = Math.max(8, Math.min(36, (cw / data.length) * 0.6));
+    const gap = cw / data.length;
+    const rects = [];
+
+    // Grid
+    ctx.strokeStyle = CHART_COLORS.grid;
+    for (let i = 0; i <= 4; i++) {
+      const y = pad.top + (ch / 4) * i;
+      ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke();
+      ctx.fillStyle = CHART_COLORS.textSoft; ctx.font = "10px Inter, sans-serif"; ctx.textAlign = "right";
+      ctx.fillText(Math.round(maxVal - (maxVal/4)*i) + "", pad.left - 6, y + 4);
+    }
+
+    data.forEach((d, i) => {
+      const cat = categories.find((c) => c.name === d.name);
+      const barH = (d.minutes / maxVal) * ch;
+      const x = pad.left + gap * i + (gap - barW) / 2;
+      const y = pad.top + ch - barH;
+      const color = cat?.color || CHART_COLORS.blue;
+      const isActive = activeCategory === d.name;
+      rects.push({ x, y, w: barW, h: barH, name: d.name });
+
+      const grad = ctx.createLinearGradient(x, y, x, pad.top + ch);
+      grad.addColorStop(0, isActive ? color : (color + "cc"));
+      grad.addColorStop(1, isActive ? color : (color + "22"));
+      ctx.fillStyle = grad;
+      const r = Math.min(4, barW / 2);
+      ctx.beginPath();
+      ctx.moveTo(x, pad.top + ch); ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y); ctx.lineTo(x + barW - r, y);
+      ctx.quadraticCurveTo(x + barW, y, x + barW, y + r); ctx.lineTo(x + barW, pad.top + ch);
+      ctx.closePath(); ctx.fill();
+
+      if (isActive) { ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke(); }
+
+      ctx.fillStyle = isActive ? color : "#F4F4F5"; ctx.font = "bold 10px Inter, sans-serif"; ctx.textAlign = "center";
+      ctx.fillText(d.minutes + "", x + barW / 2, y - 4);
+      ctx.fillStyle = isActive ? color : CHART_COLORS.textSoft; ctx.font = `${isActive ? "bold " : ""}9px Inter, sans-serif`;
+      ctx.fillText(d.name.length > 4 ? d.name.slice(0, 4) + ".." : d.name, x + barW/2, pad.top + ch + 16);
+    });
+    barRects.current = rects;
+  }, [data, categories, activeCategory]);
+
+  const handleClick = (e) => {
+    if (!onBarClick) return;
+    const canvas = ref.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+    for (const bar of barRects.current) {
+      if (cx >= bar.x && cx <= bar.x + bar.w && cy >= bar.y && cy <= bar.y + bar.h) {
+        onBarClick(bar.name); return;
+      }
+    }
+    onBarClick(null);
+  };
+
+  return <canvas ref={ref} style={{ width: "100%", height: 200, cursor: onBarClick ? "pointer" : "default" }} onClick={handleClick} />;
+};
+
+const DashboardLineChart = ({ data, activeCategory }) => {
+  const ref = useRef(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas || !data.length) return;
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const w = rect.width, h = 200;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    canvas.style.width = w + "px"; canvas.style.height = h + "px";
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+    const pad = { top: 10, right: 16, bottom: 28, left: 36 };
+    const cw = w - pad.left - pad.right, ch = h - pad.top - pad.bottom;
+    const maxVal = Math.max(...data.map((d) => d.minutes), 1);
+    const stepX = data.length > 1 ? cw / (data.length - 1) : cw;
+
+    ctx.strokeStyle = CHART_COLORS.grid;
+    for (let i = 0; i <= 4; i++) {
+      const y = pad.top + (ch / 4) * i;
+      ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke();
+      ctx.fillStyle = CHART_COLORS.textSoft; ctx.font = "10px Inter, sans-serif"; ctx.textAlign = "right";
+      ctx.fillText(Math.round(maxVal - (maxVal/4)*i) + "", pad.left - 6, y + 4);
+    }
+
+    const points = data.map((d, i) => ({ x: pad.left + stepX * i, y: pad.top + ch - (d.minutes / maxVal) * ch }));
+    const color = activeCategory
+      ? (data.categories?.find((c) => c.name === activeCategory)?.color || CHART_COLORS.blue)
+      : CHART_COLORS.blue;
+
+    // Fill
+    ctx.beginPath(); ctx.moveTo(points[0].x, pad.top + ch);
+    points.forEach((p) => ctx.lineTo(p.x, p.y));
+    ctx.lineTo(points[points.length-1].x, pad.top + ch); ctx.closePath();
+    const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + ch);
+    grad.addColorStop(0, color + "33"); grad.addColorStop(1, color + "04");
+    ctx.fillStyle = grad; ctx.fill();
+
+    // Line
+    ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.lineJoin = "round";
+    ctx.beginPath(); points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)); ctx.stroke();
+
+    // Dots
+    points.forEach((p, i) => {
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2);
+      ctx.fillStyle = "#11131A"; ctx.fill();
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = "#F4F4F5"; ctx.font = "bold 10px Inter, sans-serif"; ctx.textAlign = "center";
+      ctx.fillText(data[i].minutes + "", p.x, p.y - 10);
+    });
+
+    ctx.fillStyle = CHART_COLORS.textSoft; ctx.font = "9px Inter, sans-serif"; ctx.textAlign = "center";
+    points.forEach((p, i) => {
+      if (data.length > 4 && i % 2 !== 0 && i !== data.length-1) return;
+      ctx.fillText(data[i].label, p.x, pad.top + ch + 16);
+    });
+  }, [data, activeCategory]);
+
+  return <canvas ref={ref} style={{ width: "100%", height: 200 }} />;
+};
+
+const DashboardPieChart = ({ posMinutes, drainMinutes }) => {
+  const ref = useRef(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const size = 160;
+    canvas.width = size * dpr; canvas.height = size * dpr;
+    canvas.style.width = size + "px"; canvas.style.height = size + "px";
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, size, size);
+    const cx = size/2, cy = size/2, r = 60;
+    const total = posMinutes + drainMinutes || 1;
+    const posAngle = (posMinutes / total) * Math.PI * 2;
+    const drainAngle = (drainMinutes / total) * Math.PI * 2;
+
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, -Math.PI/2, -Math.PI/2 + drainAngle); ctx.closePath();
+    ctx.fillStyle = CHART_COLORS.red + "88"; ctx.fill();
+
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, -Math.PI/2 + drainAngle, -Math.PI/2 + Math.PI*2); ctx.closePath();
+    const grad = ctx.createLinearGradient(cx-r, cy-r, cx+r, cy+r);
+    grad.addColorStop(0, CHART_COLORS.green + "cc"); grad.addColorStop(1, CHART_COLORS.blue + "aa");
+    ctx.fillStyle = grad; ctx.fill();
+
+    ctx.beginPath(); ctx.arc(cx, cy, 32, 0, Math.PI*2);
+    ctx.fillStyle = "#11131A"; ctx.fill();
+
+    const posPct = Math.round((posMinutes / total) * 100);
+    ctx.fillStyle = "#F4F4F5"; ctx.font = "bold 13px Inter, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(posPct + "%", cx, cy - 4);
+    ctx.fillStyle = CHART_COLORS.textSoft; ctx.font = "9px Inter, sans-serif";
+    ctx.fillText("正向", cx, cy + 12);
+  }, [posMinutes, drainMinutes]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+      <canvas ref={ref} width={160} height={160} />
+      <div className="flex-row gap-16" style={{ fontSize: "0.72rem", color: "var(--text-soft)" }}>
+        <span><i style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: CHART_COLORS.green, marginRight: 4, verticalAlign: "middle" }} />正向 {formatMinutes(posMinutes)}</span>
+        <span><i style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: CHART_COLORS.red, marginRight: 4, verticalAlign: "middle" }} />消耗 {formatMinutes(drainMinutes)}</span>
+      </div>
+    </div>
+  );
+};
+
+
 function App() {
   const [data, setData] = useState(loadData);
   const [page, setPageRaw] = useState(() => {
@@ -167,6 +365,8 @@ function App() {
   const [importError, setImportError] = useState("");
   const reviewRef = useRef(null);
   const [exporting, setExporting] = useState(false);
+  const [dashTimeFilter, setDashTimeFilter] = useState("week");
+  const [dashCatFilter, setDashCatFilter] = useState("all");
 
   const updateData = useCallback((updater) => {
     setData((cur) => {
@@ -203,6 +403,36 @@ function App() {
     const pct = total > 0 ? Math.round((assetMin / total) * 100) : 0;
     return { total, assetMin, drainMin, pct };
   }, [todayEvents, data.categories]);
+
+  // Dashboard stats (time + category filtered)
+  const dashStats = useMemo(() => {
+    const today = new Date();
+    let cutoff = null;
+    if (dashTimeFilter === "today") { cutoff = new Date(today); cutoff.setHours(0,0,0,0); }
+    else if (dashTimeFilter === "week") { cutoff = new Date(today); cutoff.setDate(cutoff.getDate() - 7); }
+    else if (dashTimeFilter === "month") { cutoff = new Date(today); cutoff.setDate(cutoff.getDate() - 30); }
+    let filtered = cutoff
+      ? data.events.filter((e) => new Date(e.createdAt) >= cutoff)
+      : data.events;
+    if (dashCatFilter !== "all") filtered = filtered.filter((e) => e.category === dashCatFilter);
+
+    const totalMinutes = filtered.reduce((s, e) => s + e.duration, 0);
+    const recordCount = filtered.length;
+    const catMap = {};
+    filtered.forEach((e) => { catMap[e.category] = (catMap[e.category] || 0) + e.duration; });
+    const byCategory = Object.entries(catMap).map(([name, minutes]) => ({ name, minutes })).sort((a, b) => b.minutes - a.minutes);
+    const posMinutes = filtered.reduce((s, e) => { const c = data.categories.find((x) => x.name === e.category); return c?.isPositive ? s + e.duration : s; }, 0);
+    const drainMinutes = filtered.reduce((s, e) => { const c = data.categories.find((x) => x.name === e.category); return c && !c.isPositive ? s + e.duration : s; }, 0);
+    const trend7Day = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today); d.setDate(d.getDate() - i);
+      const key = localDateKey(d);
+      const dayMin = filtered.filter((e) => localDateKey(e.createdAt) === key).reduce((s, e) => s + e.duration, 0);
+      trend7Day.push({ date: key, label: `${d.getMonth()+1}/${d.getDate()}`, minutes: dayMin });
+    }
+    const recentRecords = [...filtered].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 8);
+    return { totalMinutes, recordCount, byCategory, posMinutes, drainMinutes, trend7Day, recentRecords };
+  }, [data.events, dashTimeFilter, dashCatFilter, data.categories]);
 
   // Quick record handler
   const quickRecord = useCallback((preset) => {
@@ -792,49 +1022,112 @@ function App() {
           <>
             <h1 className="page-title">仪表盘</h1>
             <p className="page-subtitle">数据驱动的时间资产管理</p>
-            <div className="grid-4 mb-16">
-              <div className="card"><div className="card-title">总记录</div><div style={{ fontSize: "1.5rem", fontWeight: 700 }}>{data.events.length}</div></div>
-              <div className="card"><div className="card-title">总时长</div><div style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--accent)" }}>{formatMinutes(data.events.reduce((s,e) => s + e.duration, 0))}</div></div>
-              <div className="card"><div className="card-title">项目数</div><div style={{ fontSize: "1.5rem", fontWeight: 700 }}>{data.projects.length}</div></div>
-              <div className="card"><div className="card-title">任务完成</div><div style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--success)" }}>{data.tasks.filter((t) => t.completed).length}</div></div>
+
+            {/* Time + Category filters */}
+            <div className="flex-row gap-8 mb-16" style={{ flexWrap: "wrap" }}>
+              {[
+                { key: "week", label: "本周" },
+                { key: "today", label: "今天" },
+                { key: "month", label: "本月" },
+                { key: "all", label: "全部" },
+              ].map((f) => (
+                <button key={f.key} className={`task-tab ${dashTimeFilter === f.key ? "is-active" : ""}`}
+                  type="button" onClick={() => setDashTimeFilter(f.key)}>{f.label}</button>
+              ))}
+              <select className="task-tab" style={{ marginLeft: "auto", minWidth: 120 }}
+                value={dashCatFilter} onChange={(e) => setDashCatFilter(e.target.value)}>
+                <option value="all">全部分类</option>
+                {data.categories.filter((c) => c.enabled !== false).map((c) => (
+                  <option key={c.id} value={c.name}>{c.name}</option>
+                ))}
+              </select>
             </div>
+
+            {/* KPI cards */}
+            <div className="grid-4 mb-16">
+              <div className="card">
+                <div className="card-title">总投入</div>
+                <div style={{ fontSize: "1.5rem", fontWeight: 700 }}>{formatMinutes(dashStats.totalMinutes)}</div>
+              </div>
+              <div className="card">
+                <div className="card-title">正向资产</div>
+                <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--success)" }}>{formatMinutes(dashStats.posMinutes)}</div>
+              </div>
+              <div className="card">
+                <div className="card-title">注意力消耗</div>
+                <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--danger)" }}>{formatMinutes(dashStats.drainMinutes)}</div>
+              </div>
+              <div className="card">
+                <div className="card-title">记录条数</div>
+                <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--accent)" }}>{dashStats.recordCount}</div>
+              </div>
+            </div>
+
+            {/* Charts row 1 */}
             <div className="grid-2 mb-16">
               <div className="card">
-                <div className="card-title">分类分布</div>
-                <div style={{ display: "grid", gap: 6 }}>
-                  {(() => {
-                    const catMap = {};
-                    data.events.forEach((e) => { catMap[e.category] = (catMap[e.category] || 0) + e.duration; });
-                    const max = Math.max(...Object.values(catMap), 1);
-                    return Object.entries(catMap).sort((a,b) => b[1] - a[1]).map(([name, min]) => {
-                      const cat = data.categories.find((c) => c.name === name);
-                      const pct = Math.round((min / max) * 100);
-                      return (
-                        <div key={name} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <span style={{ width: 10, height: 10, borderRadius: 3, background: cat?.color || "#888", flexShrink: 0 }} />
-                          <span style={{ flex: 1, fontSize: "0.8rem" }}>{name}</span>
-                          <div className="progress-bar" style={{ flex: 1, maxWidth: 100 }}>
-                            <div className="progress-fill" style={{ width: `${pct}%`, background: cat?.color }} />
-                          </div>
-                          <span style={{ fontSize: "0.78rem", color: "var(--text-soft)", width: 50, textAlign: "right" }}>{formatMinutes(min)}</span>
-                        </div>
-                      );
-                    });
-                  })()}
-                </div>
+                <div className="card-title">分类投入分布</div>
+                <div className="mb-8" style={{ fontSize: "0.68rem", color: "var(--text-faint)" }}>点击分类柱可联动折线图</div>
+                {dashStats.byCategory.length > 0 ? (
+                  <DashboardBarChart data={dashStats.byCategory} categories={data.categories}
+                    onBarClick={(cat) => setDashCatFilter(cat || "all")}
+                    activeCategory={dashCatFilter !== "all" ? dashCatFilter : null} />
+                ) : <div className="empty-state"><p>暂无数据</p></div>}
               </div>
               <div className="card">
-                <div className="card-title">最近 7 天复盘</div>
-                {data.reviews.slice(0, 7).length === 0 ? (
-                  <div className="empty-state"><p>暂无复盘记录</p></div>
-                ) : data.reviews.slice(0, 7).map((r) => (
-                  <div key={r.id} className="flex-between" style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: "0.8rem" }}>
-                    <span>{r.date}</span>
-                    <span style={{ color: "var(--text-soft)" }}>{formatMinutes(r.totalMinutes)}</span>
-                    <span style={{ color: "var(--text-faint)" }}>{r.completedTaskCount} 项任务</span>
-                  </div>
-                ))}
+                <div className="card-title">近 7 天投入趋势</div>
+                {dashCatFilter !== "all" && (
+                  <div className="mb-8" style={{ fontSize: "0.68rem", color: "var(--accent)" }}>筛选：{dashCatFilter}</div>
+                )}
+                {dashStats.trend7Day.some((d) => d.minutes > 0) ? (
+                  <DashboardLineChart data={dashStats.trend7Day} activeCategory={dashCatFilter !== "all" ? dashCatFilter : null} />
+                ) : <div className="empty-state"><p>暂无数据</p></div>}
               </div>
+            </div>
+
+            {/* Charts row 2 */}
+            <div className="grid-2 mb-16">
+              <div className="card">
+                <div className="card-title">正向 / 消耗比例</div>
+                {(dashStats.posMinutes > 0 || dashStats.drainMinutes > 0) ? (
+                  <DashboardPieChart posMinutes={dashStats.posMinutes} drainMinutes={dashStats.drainMinutes} />
+                ) : <div className="empty-state"><p>暂无数据</p></div>}
+              </div>
+              <div className="card">
+                <div className="card-title">最近记录</div>
+                {dashStats.recentRecords.length > 0 ? (
+                  <div className="event-list">
+                    {dashStats.recentRecords.map((ev) => {
+                      const cat = data.categories.find((c) => c.name === ev.category);
+                      const proj = data.projects.find((p) => p.id === ev.projectId);
+                      return (
+                        <div className="event-row" key={ev.id}>
+                          <span className="event-swatch" style={{ background: cat?.color || "#888" }} />
+                          <div className="event-info">
+                            <strong>{ev.title}</strong>
+                            <small>{ev.category}{proj ? " · " + proj.name : ""} · {localDateKey(ev.createdAt)}</small>
+                          </div>
+                          <span className="event-duration">{formatMinutes(ev.duration)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : <div className="empty-state"><p>暂无记录</p></div>}
+              </div>
+            </div>
+
+            {/* Historic reviews */}
+            <div className="card">
+              <div className="card-title">最近 7 天复盘历史</div>
+              {data.reviews.slice(0, 7).length === 0 ? (
+                <div className="empty-state"><p>暂无复盘记录</p></div>
+              ) : data.reviews.slice(0, 7).map((r) => (
+                <div key={r.id} className="flex-between" style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: "0.8rem" }}>
+                  <span>{r.date}</span>
+                  <span style={{ color: "var(--text-soft)" }}>{formatMinutes(r.totalMinutes)}</span>
+                  <span style={{ color: "var(--text-faint)" }}>{r.completedTaskCount} 项任务</span>
+                </div>
+              ))}
             </div>
           </>
         )}
