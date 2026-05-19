@@ -1,4 +1,4 @@
-# 第一性原则复盘系统
+# LifeOS
 
 一个纯前端个人复盘 Web App。项目代码托管在 GitHub，使用 GitHub Actions 构建，并通过 GitHub Pages 发布为公网网页。
 

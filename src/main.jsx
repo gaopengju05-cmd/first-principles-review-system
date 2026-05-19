@@ -1387,8 +1387,8 @@ function App() {
       <div className="app-layout">
         <aside className="app-sidebar">
           <div className="sidebar-brand">
-            <div className="brand-mark"><span />Personal Review System</div>
-            <p>Life · Assets · Progress</p>
+            <div className="brand-mark"><span />LifeOS</div>
+            <p>Life Operating System</p>
           </div>
           <nav className="app-nav">
             <p className="nav-section-label">核心</p>
