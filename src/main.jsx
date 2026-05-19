@@ -26,14 +26,14 @@ const STORAGE_KEY = "app:review-system:v1";
 // API Key removed; AI parse disabled until backend proxy is ready
 
 const DEFAULT_CATEGORIES = [
-  { id: "cat-academic", name: "学业资产", kind: "asset", type: "growth", isPositive: true, order: 1, color: "#69d2e7" },
-  { id: "cat-english", name: "英语资产", kind: "asset", type: "compound", isPositive: true, order: 2, color: "#a7db57" },
-  { id: "cat-body", name: "身体资产", kind: "asset", type: "compound", isPositive: true, order: 3, color: "#f6d365" },
-  { id: "cat-output", name: "输出资产", kind: "asset", type: "leverage", isPositive: true, order: 4, color: "#fda085" },
-  { id: "cat-survival", name: "生存任务", kind: "maintenance", type: "survival", isPositive: false, order: 5, color: "#b8c0ff" },
-  { id: "cat-attention", name: "注意力消耗", kind: "drain", type: "consumption", isPositive: false, order: 6, color: "#ff8fab" },
-  { id: "cat-relation", name: "关系资产", kind: "asset", type: "compound", isPositive: true, order: 7, color: "#8ecae6" },
-  { id: "cat-finance", name: "财务资产", kind: "asset", type: "growth", isPositive: true, order: 8, color: "#80ed99" },
+  { id: "cat-academic", name: "学业资产", kind: "asset", type: "growth", isPositive: true, isPreset: true, order: 1, color: "#69d2e7" },
+  { id: "cat-english", name: "英语资产", kind: "asset", type: "compound", isPositive: true, isPreset: true, order: 2, color: "#a7db57" },
+  { id: "cat-body", name: "身体资产", kind: "asset", type: "compound", isPositive: true, isPreset: true, order: 3, color: "#f6d365" },
+  { id: "cat-output", name: "输出资产", kind: "asset", type: "leverage", isPositive: true, isPreset: true, order: 4, color: "#fda085" },
+  { id: "cat-survival", name: "生存任务", kind: "maintenance", type: "survival", isPositive: false, isPreset: true, order: 5, color: "#b8c0ff" },
+  { id: "cat-attention", name: "注意力消耗", kind: "drain", type: "consumption", isPositive: false, isPreset: true, order: 6, color: "#ff8fab" },
+  { id: "cat-relation", name: "关系资产", kind: "asset", type: "compound", isPositive: true, isPreset: true, order: 7, color: "#8ecae6" },
+  { id: "cat-finance", name: "财务资产", kind: "asset", type: "growth", isPositive: true, isPreset: true, order: 8, color: "#80ed99" },
 ];
 
 const makeId = (prefix) => {
@@ -83,12 +83,15 @@ const createDefaultData = () => ({
 
 const ensureArray = (value) => (Array.isArray(value) ? value : []);
 
+const PRESET_IDS = new Set(DEFAULT_CATEGORIES.map((c) => c.id));
+
 const normalizeCategory = (cat) => ({
   id: cat.id || makeId("cat"),
   name: String(cat.name || "未命名"),
   kind: ["asset", "maintenance", "drain"].includes(cat.kind) ? cat.kind : "asset",
   type: ["survival", "growth", "leverage", "compound", "consumption"].includes(cat.type) ? cat.type : "growth",
   isPositive: typeof cat.isPositive === "boolean" ? cat.isPositive : (cat.kind !== "drain"),
+  isPreset: cat.isPreset === true || PRESET_IDS.has(cat.id),
   order: typeof cat.order === "number" ? cat.order : 99,
   color: cat.color || "#c4b5fd",
 });
@@ -811,12 +814,16 @@ function App() {
   };
 
   const deleteCategory = (catId) => {
+    const cat = data.categories.find((c) => c.id === catId);
+    if (!cat) return;
+    if (cat.isPreset) {
+      showToast("⚠️ 预设分类不可删除");
+      return;
+    }
     if (data.categories.length <= 1) {
       showToast("⚠️ 至少保留一个分类");
       return;
     }
-    const cat = data.categories.find((c) => c.id === catId);
-    if (!cat) return;
     const confirmed = window.confirm(`确定删除分类「${cat.name}」吗？`);
     if (!confirmed) return;
     updateData((current) => ({
@@ -1086,7 +1093,7 @@ function App() {
                 </div>
                 <div className="record-tabs">
                   <button className="record-tab is-active" type="button">手动记录</button>
-                  <button className="record-tab is-disabled" type="button" disabled title="AI 解析功能升级中，稍后恢复">AI 流水账</button>
+                  <button className="record-tab is-disabled" type="button" disabled>AI 流水账（升级中）</button>
                 </div>
                 <form className="stack-form compact-form" onSubmit={addEvent} style={{ marginTop: 0 }}>
                   <input

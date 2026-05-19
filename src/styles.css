@@ -1867,10 +1867,14 @@ button:disabled {
   }
   .hero-record-btn {
     flex: 1;
-    padding: 10px 12px;
+    padding: 10px 8px;
+    white-space: nowrap;
+    min-width: 0;
   }
   .hero-btn-label {
     font-size: 0.82rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .hero-snapshot {
     font-size: 0.72rem;
@@ -2199,5 +2203,22 @@ button:disabled {
   }
   .page-assets .header-actions .ghost-button {
     flex: 1;
+  }
+  .hero-actions {
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+  .hero-record-btn {
+    padding: 8px 6px;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .hero-btn-label {
+    font-size: 0.75rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hero-btn-meta {
+    font-size: 0.65rem;
   }
 }
