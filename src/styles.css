@@ -1179,6 +1179,13 @@ button:disabled {
 }
 
 /* Trend bars */
+.trend-legend {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  margin: 0 0 8px;
+  line-height: 1.4;
+}
+
 .trend-bars {
   display: flex;
   align-items: flex-end;
@@ -1425,6 +1432,12 @@ button:disabled {
   font-size: 0.72rem;
   color: var(--text-faint);
 }
+.hero-hint {
+  font-size: 0.68rem;
+  color: var(--text-faint);
+  margin: 4px 0 0;
+  text-align: center;
+}
 
 /* ── Category edit panel ─────────────────────── */
 .category-panel-header {
@@ -1658,7 +1671,33 @@ button:disabled {
 }
 
 
-/* ── AI Input ──────────────────────────────── */
+/* ── Record Tabs ──────────────────────────── */
+.record-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.record-tab {
+  padding: 8px 18px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.record-tab.is-active {
+  color: var(--text);
+  border-bottom-color: var(--blue);
+}
+.record-tab.is-disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+/* ── AI Input (deprecated) ──────────────────── */
 .ai-input-area {
   display: flex;
   gap: 8px;
@@ -2050,3 +2089,115 @@ button:disabled {
 
 /* ── Responsive ── */
 
+
+/* ── Assets Page ───────────────────────────── */
+.cat-list {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 0;
+}
+.cat-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+.cat-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.cat-name {
+  flex: 1;
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+.cat-kind-tag {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.page-assets .page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.page-assets .page-header h2 {
+  margin: 0;
+}
+.page-assets .header-actions {
+  display: flex;
+  gap: 6px;
+}
+
+
+/* ── Mobile: 390px ────────────────────────── */
+@media (max-width: 480px) {
+  .ai-input-area {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ai-parse-btn {
+    width: 100%;
+    text-align: center;
+  }
+  .two-columns {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .record-tabs {
+    flex-direction: row;
+  }
+  .record-tab {
+    flex: 1;
+    text-align: center;
+    font-size: 0.78rem;
+    padding: 8px 10px;
+  }
+  .app-layout {
+    flex-direction: column;
+  }
+  .app-sidebar {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .app-nav {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .nav-item {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+    padding: 8px 4px;
+    font-size: 0.75rem;
+  }
+  .dash-metrics {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .page-assets .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .page-assets .header-actions {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .page-assets .header-actions .ghost-button {
+    flex: 1;
+  }
+}
