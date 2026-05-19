@@ -480,8 +480,10 @@ const COLORS = {
   grid: "rgba(214,223,255,0.05)",
 };
 
-const DashboardBarChart = ({ data, categories }) => {
+const DashboardBarChart = ({ data, categories, onBarClick, activeCategory }) => {
   const ref = useRef(null);
+  const barRects = useRef([]);
+  
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas || data.length === 0) return;
@@ -503,6 +505,7 @@ const DashboardBarChart = ({ data, categories }) => {
     const maxVal = Math.max(...data.map((d) => d.minutes), 1);
     const barW = Math.max(8, Math.min(36, (cw / data.length) * 0.6));
     const gap = cw / data.length;
+    const rects = [];
 
     // Grid lines
     ctx.strokeStyle = COLORS.grid;
@@ -526,11 +529,14 @@ const DashboardBarChart = ({ data, categories }) => {
       const x = pad.left + gap * i + (gap - barW) / 2;
       const y = pad.top + ch - barH;
       const color = cat?.color || COLORS.blue;
+      const isActive = activeCategory === d.name;
+
+      rects.push({ x, y, w: barW, h: barH, name: d.name });
 
       // Gradient bar
       const grad = ctx.createLinearGradient(x, y, x, pad.top + ch);
-      grad.addColorStop(0, color);
-      grad.addColorStop(1, color + "44");
+      grad.addColorStop(0, isActive ? color : (color + "88"));
+      grad.addColorStop(1, isActive ? color : (color + "22"));
       ctx.fillStyle = grad;
 
       // Rounded top
@@ -545,20 +551,44 @@ const DashboardBarChart = ({ data, categories }) => {
       ctx.closePath();
       ctx.fill();
 
+      // Active border
+      if (isActive) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
       // Value label on top
-      ctx.fillStyle = COLORS.text;
+      ctx.fillStyle = isActive ? color : COLORS.text;
       ctx.font = "bold 10px Inter, sans-serif";
       ctx.textAlign = "center";
       ctx.fillText(d.minutes + "", x + barW / 2, y - 4);
 
       // Category label
-      ctx.fillStyle = COLORS.textSoft;
-      ctx.font = "9px Inter, sans-serif";
+      ctx.fillStyle = isActive ? color : COLORS.textSoft;
+      ctx.font = `${isActive ? "bold " : ""}9px Inter, sans-serif`;
       ctx.fillText(d.name.length > 4 ? d.name.slice(0, 4) + ".." : d.name, x + barW / 2, pad.top + ch + 16);
     });
-  }, [data, categories]);
+    barRects.current = rects;
+  }, [data, categories, activeCategory]);
 
-  return <canvas ref={ref} style={{ width: "100%", height: 200 }} />;
+  const handleClick = (e) => {
+    const canvas = ref.current;
+    if (!canvas || !onBarClick) return;
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    for (const bar of barRects.current) {
+      if (cx >= bar.x && cx <= bar.x + bar.w && cy >= bar.y && cy <= bar.y + bar.h) {
+        onBarClick(bar.name);
+        return;
+      }
+    }
+    // Clicked empty area => reset
+    onBarClick(null);
+  };
+
+  return <canvas ref={ref} style={{ width: "100%", height: 200, cursor: onBarClick ? "pointer" : "default" }} onClick={handleClick} />;
 };
 
 const DashboardLineChart = ({ data }) => {
@@ -754,7 +784,8 @@ function App() {
   });
   const [categoryForm, setCategoryForm] = useState({ name: "", kind: "asset", type: "growth", color: "#c4b5fd" });
   const [activeCategoryFilter, setActiveCategoryFilter] = useState("all");
-  const [dashTimeFilter, setDashTimeFilter] = useState("all"); // today | week | month | all
+  const [dashTimeFilter, setDashTimeFilter] = useState("week"); // today | week | month | all
+  const [dashCatFilter, setDashCatFilter] = useState("all"); // all or category name
   const [conversionTargets, setConversionTargets] = useState({});
   const [importError, setImportError] = useState("");
   const [schedule, setSchedule] = useState(() => {
@@ -1278,9 +1309,14 @@ function App() {
     } else if (dashTimeFilter === "month") {
       cutoff = new Date(today); cutoff.setDate(cutoff.getDate() - 30);
     }
-    const filtered = cutoff
+    let filtered = cutoff
       ? data.events.filter((e) => new Date(e.createdAt) >= cutoff)
       : data.events;
+
+    // Category filter (applied after time filter)
+    if (dashCatFilter !== "all") {
+      filtered = filtered.filter((e) => e.category === dashCatFilter);
+    }
 
     // Total
     const totalMinutes = filtered.reduce((s, e) => s + e.duration, 0);
@@ -1321,7 +1357,7 @@ function App() {
       .slice(0, 8);
 
     return { totalMinutes, recordCount, byCategory, posMinutes, drainMinutes, trend7Day, recentRecords };
-  }, [data.events, dashTimeFilter, data.categories]);
+  }, [data.events, dashTimeFilter, dashCatFilter, data.categories]);
 
   // Mainline asset (category marked as current phase focus)
   const mainlineCategory = data.categories.find((c) => c.type === "growth" && c.isPositive) || data.categories.find((c) => c.isPositive);
@@ -1591,11 +1627,21 @@ function App() {
                 <p className="text-soft">数据驱动的时间资产管理</p>
               </div>
 
+              {dashStats.totalMinutes === 0 && dashTimeFilter === "all" && data.events.length === 0 && (
+                <div className="dash-empty-hero">
+                  <h3>还没有任何记录</h3>
+                  <p>去快速记录页输入今天的第一条时间记录，仪表盘会自动生成统计图表。</p>
+                  <button className="ghost-button" type="button" onClick={() => navigateTo("record")} style={{ marginTop: 8 }}>
+                    <Plus size={16} />开始记录
+                  </button>
+                </div>
+              )}
+
               {/* Time filter */}
               <div className="dash-filter-bar">
                 {[
-                  { key: "today", label: "今天" },
                   { key: "week", label: "本周" },
+                  { key: "today", label: "今天" },
                   { key: "month", label: "本月" },
                   { key: "all", label: "全部" },
                 ].map((f) => (
@@ -1608,6 +1654,16 @@ function App() {
                     {f.label}
                   </button>
                 ))}
+                <select
+                  className="dash-filter-select"
+                  value={dashCatFilter}
+                  onChange={(e) => setDashCatFilter(e.target.value)}
+                >
+                  <option value="all">全部分类</option>
+                  {data.categories.map((cat) => (
+                    <option key={cat.id} value={cat.name}>{cat.name}</option>
+                  ))}
+                </select>
               </div>
 
               {/* KPI cards */}
@@ -1640,9 +1696,9 @@ function App() {
                   </div>
                   <div className="dash-chart-body">
                     {dashStats.byCategory.length > 0 ? (
-                      <DashboardBarChart data={dashStats.byCategory} categories={data.categories} />
+                      <DashboardBarChart data={dashStats.byCategory} categories={data.categories} onBarClick={(cat) => setDashCatFilter(cat || "all")} activeCategory={dashCatFilter !== "all" ? dashCatFilter : null} />
                     ) : (
-                      <p className="empty-text">暂无数据</p>
+                      <div className="dash-empty"><p>暂无数据</p><button className="ghost-button" type="button" onClick={() => navigateTo("record")}>去记录</button></div>
                     )}
                   </div>
                 </section>
@@ -1657,7 +1713,7 @@ function App() {
                     {dashStats.trend7Day.some((d) => d.minutes > 0) ? (
                       <DashboardLineChart data={dashStats.trend7Day} />
                     ) : (
-                      <p className="empty-text">暂无数据</p>
+                      <div className="dash-empty"><p>暂无数据</p><button className="ghost-button" type="button" onClick={() => navigateTo("record")}>去记录</button></div>
                     )}
                   </div>
                 </section>
@@ -1675,7 +1731,7 @@ function App() {
                     {(dashStats.posMinutes > 0 || dashStats.drainMinutes > 0) ? (
                       <DashboardPieChart posMinutes={dashStats.posMinutes} drainMinutes={dashStats.drainMinutes} />
                     ) : (
-                      <p className="empty-text">暂无数据</p>
+                      <div className="dash-empty"><p>暂无数据</p><button className="ghost-button" type="button" onClick={() => navigateTo("record")}>去记录</button></div>
                     )}
                   </div>
                 </section>
@@ -1705,7 +1761,7 @@ function App() {
                         })}
                       </div>
                     ) : (
-                      <p className="empty-text">暂无记录</p>
+                      <div className="dash-empty"><p>暂无记录</p><button className="ghost-button" type="button" onClick={() => navigateTo("record")}>去记录</button></div>
                     )}
                   </div>
                 </section>

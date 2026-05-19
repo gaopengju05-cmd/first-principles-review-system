@@ -2249,6 +2249,21 @@ button:disabled {
   color: var(--blue-strong);
   font-weight: 600;
 }
+.dash-filter-select {
+  margin-left: auto;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  cursor: pointer;
+  min-width: 120px;
+}
+.dash-filter-select:focus {
+  outline: none;
+  border-color: var(--blue);
+}
 
 .dash-metrics {
   display: grid;
@@ -2371,4 +2386,38 @@ button:disabled {
     padding: 8px 10px;
     font-size: 0.75rem;
   }
+  .dash-filter-select {
+    margin-left: 0;
+    width: 100%;
+    margin-top: 4px;
+  }
+}
+
+/* ── Dashboard Empty States ────────────────── */
+.dash-empty {
+  text-align: center;
+  padding: 16px 0;
+}
+.dash-empty p {
+  color: var(--text-faint);
+  font-size: 0.82rem;
+  margin: 0 0 8px;
+}
+.dash-empty-hero {
+  text-align: center;
+  padding: 32px 20px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+}
+.dash-empty-hero h3 {
+  color: var(--text-soft);
+  font-size: 1rem;
+  margin: 0 0 4px;
+}
+.dash-empty-hero p {
+  color: var(--text-faint);
+  font-size: 0.78rem;
+  margin: 0;
+  line-height: 1.5;
 }
