@@ -1,0 +1,101 @@
+{
+  "exportedAt": "2026-05-20T02:42:03.986Z",
+  "storageKey": "app:review-system:v1",
+  "data": {
+    "projects": [
+      {
+        "id": "demo-project-review-system",
+        "name": "考试复盘系统",
+        "description": "用 LifeOS 跟踪每天的学习、输出和消耗时间。",
+        "createdAt": "2026-05-20T02:42:03.986Z",
+        "status": "active",
+        "category": "学业资产",
+        "progress": 0
+      }
+    ],
+    "tasks": [
+      {
+        "id": "demo-task-review-week",
+        "projectId": "demo-project-review-system",
+        "title": "整理本周错题和复盘卡",
+        "completed": false,
+        "createdAt": "2026-05-20T02:42:03.986Z",
+        "completedAt": null,
+        "fromIdeaId": null
+      },
+      {
+        "id": "demo-task-output",
+        "projectId": "demo-project-review-system",
+        "title": "写一篇学习总结",
+        "completed": true,
+        "createdAt": "2026-05-20T02:42:03.986Z",
+        "completedAt": "2026-05-20T02:42:03.986Z",
+        "fromIdeaId": null
+      }
+    ],
+    "ideas": [
+      {
+        "id": "demo-idea-1",
+        "content": "把每天最高质量的第一段时间留给学业资产。",
+        "createdAt": "2026-05-20T02:42:03.986Z",
+        "linkedProjectId": "demo-project-review-system",
+        "status": "open"
+      }
+    ],
+    "events": [
+      {
+        "id": "demo-event-english",
+        "title": "英语阅读精读",
+        "duration": 90,
+        "category": "英语资产",
+        "projectId": "demo-project-review-system",
+        "taskId": null,
+        "categoryId": null,
+        "createdAt": "2026-05-20T02:42:03.986Z"
+      },
+      {
+        "id": "demo-event-review",
+        "title": "整理错题",
+        "duration": 75,
+        "category": "学业资产",
+        "projectId": "demo-project-review-system",
+        "taskId": "demo-task-review-week",
+        "categoryId": null,
+        "createdAt": "2026-05-20T02:42:03.986Z"
+      },
+      {
+        "id": "demo-event-scroll",
+        "title": "低质量刷屏",
+        "duration": 35,
+        "category": "注意力消耗",
+        "projectId": null,
+        "taskId": null,
+        "categoryId": null,
+        "createdAt": "2026-05-20T02:42:03.986Z"
+      }
+    ],
+    "categories": [],
+    "reviews": [
+      {
+        "id": "demo-review-today",
+        "date": "2026-05-20",
+        "createdAt": "2026-05-20T02:42:03.986Z",
+        "totalMinutes": 200,
+        "assetMinutes": 165,
+        "drainMinutes": 35,
+        "completedTaskCount": 1,
+        "ideaCount": 1,
+        "recommendation": "今天资产投入占比不错，明天继续保持第一段清醒时间给高价值资产。"
+      }
+    ],
+    "schedules": [],
+    "settings": {
+      "theme": "obsidian",
+      "activeProjectId": "demo-project-review-system",
+      "activePage": "today",
+      "sidebarCollapsed": false,
+      "dashboardView": "week",
+      "lastOpenDate": "2026-05-20"
+    }
+  }
+}

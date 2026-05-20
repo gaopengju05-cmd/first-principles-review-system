@@ -1,122 +1,180 @@
-# LifeOS
+# LifeOS 个人复盘系统
 
-一个纯前端个人复盘 Web App。项目代码托管在 GitHub，使用 GitHub Actions 构建，并通过 GitHub Pages 发布为公网网页。
+LifeOS 是一个本地优先的个人复盘 Web App，用来记录每天的时间投入、项目任务、资产分类、每日复盘和趋势仪表盘。
 
-本项目不需要登录、不连接数据库、不接 Supabase、不提供后端接口。所有复盘数据只保存在访问者自己浏览器的 localStorage 中，不会上传服务器。
-
-## 技术栈
-
-- Vite
-- React
-- localStorage
-- html2canvas
-- GitHub Actions
-- GitHub Pages
-
-## 本地运行
+这个项目的交付目标很简单：
 
 ```bash
-npm install
+解压 -> cd 项目目录 -> ./run.sh -> 自动跑起来
+```
+
+## 一键启动
+
+```bash
+./run.sh
+```
+
+脚本会自动完成：
+
+- 检查本机是否有 Node.js 和 npm
+- 安装前端依赖
+- 启动本地开发服务
+- 自动打开浏览器
+
+默认访问地址是：
+
+```text
+http://127.0.0.1:5173/
+```
+
+如果 5173 端口被占用，脚本会自动寻找后续可用端口。
+
+## 项目结构
+
+```text
+LifeOS/
+├── README.md
+├── 使用指南.md
+├── 设计方案.md
+├── run.sh
+├── .env.example
+├── .gitignore
+├── frontend/
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── index.html
+│   ├── vite.config.js
+│   └── src/
+├── backend/
+│   └── cloudflare-worker/
+├── data/
+├── docs/
+│   └── assets/
+└── scripts/
+```
+
+## 常用命令
+
+启动项目：
+
+```bash
+./run.sh
+```
+
+只安装前端依赖：
+
+```bash
+cd frontend
+npm ci
+```
+
+本地开发：
+
+```bash
+cd frontend
 npm run dev
 ```
 
-浏览器打开终端显示的本地地址，通常是 `http://localhost:5173`。
-
-## 本地构建
+构建静态网页：
 
 ```bash
+cd frontend
 npm run build
 ```
 
-Vite 会生成 `dist` 目录。GitHub Actions 会上传 `dist` 并发布到 GitHub Pages。
-
-## 本地预览
+预览构建结果：
 
 ```bash
+cd frontend
 npm run preview
 ```
 
-## GitHub 上传方式
+生成可导入的演示数据：
 
 ```bash
-git init
-git add .
-git commit -m "init review system"
-git branch -M main
-git remote add origin 仓库地址
-git push -u origin main
+node scripts/seed_demo.mjs
 ```
 
-注意：不要提交 `node_modules`、`dist`、`.env`、`.env.local`。
+打一个干净的分享 zip：
 
-## GitHub Pages 部署方式
-
-本仓库包含 GitHub Actions workflow：
-
-```text
-.github/workflows/deploy.yml
+```bash
+./scripts/package_share.sh
 ```
 
-当代码 push 到 `main` 分支后，GitHub Actions 会自动执行：
+## 数据和隐私
 
-1. 使用 Node.js 20。
-2. 运行 `npm ci` 安装依赖。
-3. 运行 `npm run build` 构建项目。
-4. 上传 `dist` 目录。
-5. 发布到 GitHub Pages。
+这个项目默认不需要登录、不连接数据库、不接 Supabase，也不上传个人数据。
 
-部署完成后的访问地址格式为：
-
-```text
-https://用户名.github.io/仓库名/
-```
-
-当前仓库名是 `first-principles-review-system`，因此 Vite 的子路径配置在 `vite.config.js` 中设置为：
-
-```js
-base: "/first-principles-review-system/"
-```
-
-GitHub 仓库需要在 `Settings -> Pages` 中将 Source 设置为 `GitHub Actions`。
-
-## localStorage 数据说明
-
-所有用户数据都保存在当前浏览器的 localStorage 中，统一 key 为：
+用户数据保存在浏览器自己的 `localStorage` 里，key 是：
 
 ```text
 app:review-system:v1
 ```
 
-数据结构：
+清除浏览器数据、更换浏览器、更换设备，都会导致本地数据不可见。请在 App 的“备份”页面定期导出 JSON。
 
-```json
-{
-  "projects": [],
-  "tasks": [],
-  "ideas": [],
-  "events": [],
-  "categories": [],
-  "reviews": [],
-  "settings": {
-    "theme": "dark-purple",
-    "activeProjectId": null,
-    "lastOpenDate": ""
-  }
-}
+## AI 解析
+
+“今日”页的大文本框可以接入 DeepSeek V4 Flash，把流水账整理成多条待确认记录，并自动匹配到现有分类、项目和任务。
+
+前端不会保存或暴露 DeepSeek API Key。线上请求会先发到 Cloudflare Worker：
+
+```text
+backend/cloudflare-worker/worker.js
 ```
 
-页面初始化时会读取该 key。没有数据时会生成默认结构和预设分类；数据损坏或 JSON 解析失败时，会自动回退到默认结构，避免页面崩溃。
+Worker 再调用 DeepSeek。部署 Worker 前需要配置：
 
-## 用户隐私说明
+```bash
+npx wrangler secret put DEEPSEEK_API_KEY
+```
 
-本系统无需登录，所有复盘数据仅保存在你的浏览器本地，不会上传服务器。清除浏览器数据或更换设备可能导致数据丢失，建议定期导出 JSON 备份。
+## 部署说明
 
-不同用户、不同浏览器、不同设备之间的 localStorage 互相隔离。GitHub Pages 只托管静态网页文件，不接收你的复盘数据。
+本项目支持 GitHub Pages。GitHub Actions workflow 位于：
 
-## 已知限制
+```text
+.github/workflows/deploy.yml
+```
 
-- 换浏览器、换设备或清除浏览器数据后，本地数据会丢失。
-- localStorage 容量有限，不适合保存大量图片或超长历史数据。
-- 多设备之间不会自动同步。
-- 导出 JSON / 导入 JSON 是手动备份能力，不是云端同步。
-- 导出 PNG 依赖浏览器渲染，若浏览器禁止下载，可能需要允许下载权限。
+发布流程会进入 `frontend/` 安装依赖、运行构建，并上传 `frontend/dist` 到 GitHub Pages。
+
+当前 Vite 子路径配置在：
+
+```text
+frontend/vite.config.js
+```
+
+默认值：
+
+```js
+base: "/first-principles-review-system/"
+```
+
+如果仓库名变了，需要同步修改这个 `base`。
+
+## 交给别人或 agent 接手时
+
+优先阅读：
+
+1. `README.md`
+2. `使用指南.md`
+3. `设计方案.md`
+
+不要把以下内容放进分享 zip：
+
+- `node_modules/`
+- `frontend/node_modules/`
+- `dist/`
+- `frontend/dist/`
+- `.env`
+- `.env.local`
+- 真实个人备份数据
+
+可直接运行：
+
+```bash
+./scripts/package_share.sh
+```
+
+它会自动排除依赖、构建产物、真实环境变量和 Git 历史，生成一个更适合分享的 zip。

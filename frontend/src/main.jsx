@@ -148,6 +148,9 @@ const getCategory = (cats, name) => cats.find((c) => c.name === name) || cats[0]
    ══════════════════════════════════════════════ */
 
 const PAGES = ["today","projects","tasks","review","dashboard","assets","backup"];
+const AI_PROXY_URL =
+  (import.meta.env && import.meta.env.VITE_LIFEOS_AI_PROXY_URL) ||
+  "https://lifeos-proxy.gaopengju.workers.dev/api/parse-journal";
 
 
 /* ══════════════════════════════════════════════
@@ -450,6 +453,162 @@ function App() {
 
   // Manual add event
   const [eventForm, setEventForm] = useState({ title:"", duration:"", category:"学业资产" });
+  const [aiRecords, setAiRecords] = useState([]);
+  const [aiParsing, setAiParsing] = useState(false);
+  const [aiError, setAiError] = useState("");
+
+  const normalizeAiRecord = (record) => {
+    const cat =
+      data.categories.find((c) => c.id === record.categoryId) ||
+      data.categories.find((c) => c.name === record.category) ||
+      enabledCategories[0] ||
+      data.categories[0];
+    const task =
+      data.tasks.find((t) => t.id === record.taskId && !t.completed) ||
+      data.tasks.find((t) => t.title === record.task && !t.completed) ||
+      null;
+    const project =
+      (task && data.projects.find((p) => p.id === task.projectId)) ||
+      data.projects.find((p) => p.id === record.projectId) ||
+      data.projects.find((p) => p.name === record.project) ||
+      null;
+    const duration = Math.round(Number(record.duration) || 0);
+    const confidence = ["high", "medium", "low"].includes(record.confidence)
+      ? record.confidence
+      : "low";
+
+    return {
+      _key: record._key || makeId("ai"),
+      title: String(record.title || "").trim(),
+      duration: duration > 0 ? duration : 30,
+      categoryId: cat?.id || null,
+      category: cat?.name || "学业资产",
+      projectId: project?.id || null,
+      taskId: task?.id || null,
+      confidence,
+      reason: String(record.reason || record.note || "").trim(),
+    };
+  };
+
+  const parseJournalWithAI = async () => {
+    const text = eventForm.title.trim();
+    if (!text) {
+      showToast("先写一段流水账");
+      return;
+    }
+
+    setAiParsing(true);
+    setAiError("");
+    try {
+      const resp = await fetch(AI_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          categories: enabledCategories.map((c) => ({
+            id: c.id,
+            name: c.name,
+            kind: c.kind,
+            type: c.type,
+            isPositive: c.isPositive,
+          })),
+          projects: data.projects.map((p) => ({
+            id: p.id,
+            name: p.name,
+            description: p.description,
+            category: p.category,
+            status: p.status,
+          })),
+          tasks: data.tasks.map((t) => ({
+            id: t.id,
+            projectId: t.projectId,
+            title: t.title,
+            completed: t.completed,
+          })),
+          activeProjectId: activeProject?.id || null,
+        }),
+      });
+      const result = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(result.error || "DeepSeek Flash 解析失败");
+      const nextRecords = ensureArray(result.records).map(normalizeAiRecord).filter((r) => r.title);
+      if (!nextRecords.length) {
+        setAiError("LifeOS 没能拆出可写入的记录，试着把事项和时长写具体一点。");
+        setAiRecords([]);
+        return;
+      }
+      setAiRecords(nextRecords);
+      showToast(`已整理出 ${nextRecords.length} 条待确认记录`);
+    } catch (err) {
+      setAiError(err.message || "DeepSeek Flash 暂时不可用，请稍后再试");
+    } finally {
+      setAiParsing(false);
+    }
+  };
+
+  const updateAiRecord = (key, patch) => {
+    setAiRecords((records) =>
+      records.map((record) => {
+        if (record._key !== key) return record;
+        const next = { ...record, ...patch };
+        if (Object.prototype.hasOwnProperty.call(patch, "categoryId")) {
+          const cat = data.categories.find((c) => c.id === patch.categoryId);
+          next.category = cat?.name || record.category;
+        }
+        if (Object.prototype.hasOwnProperty.call(patch, "taskId")) {
+          const task = data.tasks.find((t) => t.id === patch.taskId);
+          if (task?.projectId) next.projectId = task.projectId;
+        }
+        if (Object.prototype.hasOwnProperty.call(patch, "projectId")) {
+          const selectedTask = data.tasks.find((t) => t.id === next.taskId);
+          if (selectedTask && selectedTask.projectId !== patch.projectId) next.taskId = null;
+        }
+        return next;
+      }),
+    );
+  };
+
+  const removeAiRecord = (key) => {
+    setAiRecords((records) => records.filter((record) => record._key !== key));
+  };
+
+  const confirmAiRecords = () => {
+    const events = aiRecords
+      .map((record) => {
+        const cat =
+          data.categories.find((c) => c.id === record.categoryId) ||
+          data.categories.find((c) => c.name === record.category) ||
+          data.categories[0];
+        const task = data.tasks.find((t) => t.id === record.taskId) || null;
+        const project =
+          (task && data.projects.find((p) => p.id === task.projectId)) ||
+          data.projects.find((p) => p.id === record.projectId) ||
+          null;
+        const duration = Math.round(Number(record.duration) || 0);
+        return {
+          id: makeId("event"),
+          title: record.title.trim(),
+          duration,
+          category: cat?.name || "学业资产",
+          projectId: project?.id || null,
+          taskId: task?.id || null,
+          categoryId: cat?.id || null,
+          createdAt: nowIso(),
+        };
+      })
+      .filter((event) => event.title && event.duration > 0);
+
+    if (!events.length) {
+      setAiError("没有可写入的记录。");
+      return;
+    }
+
+    updateData((c) => ({ ...c, events: [...events, ...c.events] }));
+    setAiRecords([]);
+    setAiError("");
+    setEventForm({ title:"", duration:"", category: eventForm.category });
+    showToast(`已写入 ${events.length} 条记录`);
+  };
+
   const addEvent = (e) => {
     e.preventDefault();
     const title = eventForm.title.trim();
@@ -713,11 +872,109 @@ function App() {
                   <textarea
                     className="hero-input"
                     value={eventForm.title}
-                    onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
-                    placeholder="写下今天的流水账，或者直接快速记录"
+                    onChange={(e) => {
+                      setEventForm({ ...eventForm, title: e.target.value });
+                      setAiError("");
+                    }}
+                    placeholder="写下今天的流水账，让 LifeOS 自动整理到项目和任务"
                     rows={3}
                   />
+                  <div className="ai-command-bar">
+                    <button
+                      className="btn-primary"
+                      type="button"
+                      onClick={parseJournalWithAI}
+                      disabled={aiParsing || !eventForm.title.trim()}
+                    >
+                      <Sparkles size={16} />{aiParsing ? "整理中..." : "让 LifeOS 整理"}
+                    </button>
+                    <span className="ai-model-badge"><Zap size={13} />DeepSeek V4 Flash</span>
+                  </div>
                 </div>
+
+                {aiError && (
+                  <div className="ai-error">{aiError}</div>
+                )}
+
+                {aiRecords.length > 0 && (
+                  <div className="ai-review-panel">
+                    <div className="ai-review-header">
+                      <div>
+                        <div className="section-title">LifeOS 已整理</div>
+                        <p>检查项目和任务后写入今日记录。</p>
+                      </div>
+                      <button className="btn-primary" type="button" onClick={confirmAiRecords}>
+                        <Check size={16} />确认写入
+                      </button>
+                    </div>
+
+                    <div className="ai-record-list">
+                      {aiRecords.map((record) => {
+                        const projectTasks = data.tasks.filter(
+                          (task) => !task.completed && (!record.projectId || task.projectId === record.projectId),
+                        );
+                        const confidenceLabel = {
+                          high: "高置信",
+                          medium: "可确认",
+                          low: "需确认",
+                        }[record.confidence] || "需确认";
+
+                        return (
+                          <div className={`ai-record-card confidence-${record.confidence}`} key={record._key}>
+                            <div className="ai-record-top">
+                              <span className="ai-confidence">{confidenceLabel}</span>
+                              {record.reason && <span className="ai-reason">{record.reason}</span>}
+                              <button className="btn-icon danger" type="button" onClick={() => removeAiRecord(record._key)}>
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                            <div className="ai-record-grid">
+                              <input
+                                value={record.title}
+                                onChange={(e) => updateAiRecord(record._key, { title: e.target.value })}
+                                placeholder="做了什么"
+                              />
+                              <input
+                                type="number"
+                                min="1"
+                                step="1"
+                                value={record.duration}
+                                onChange={(e) => updateAiRecord(record._key, { duration: e.target.value })}
+                                placeholder="分钟"
+                              />
+                              <select
+                                value={record.categoryId || ""}
+                                onChange={(e) => updateAiRecord(record._key, { categoryId: e.target.value })}
+                              >
+                                {enabledCategories.map((cat) => (
+                                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                ))}
+                              </select>
+                              <select
+                                value={record.projectId || ""}
+                                onChange={(e) => updateAiRecord(record._key, { projectId: e.target.value || null })}
+                              >
+                                <option value="">不关联项目</option>
+                                {data.projects.map((project) => (
+                                  <option key={project.id} value={project.id}>{project.name}</option>
+                                ))}
+                              </select>
+                              <select
+                                value={record.taskId || ""}
+                                onChange={(e) => updateAiRecord(record._key, { taskId: e.target.value || null })}
+                              >
+                                <option value="">不关联任务</option>
+                                {projectTasks.map((task) => (
+                                  <option key={task.id} value={task.id}>{task.title}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 <div className="quick-actions">
                   {[
@@ -733,7 +990,7 @@ function App() {
                   ))}
                 </div>
 
-                {eventForm.title.trim() && Number(eventForm.duration) > 0 && (
+                {eventForm.title.trim() && aiRecords.length === 0 && (
                   <form className="inline-form two-cols mb-16" onSubmit={addEvent}>
                     <input type="number" min="1" step="1" value={eventForm.duration}
                       onChange={(e) => setEventForm({ ...eventForm, duration: e.target.value })}
@@ -743,7 +1000,7 @@ function App() {
                       {enabledCategories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
                     </select>
                     <button className="btn-primary" type="submit" style={{ gridColumn: "1 / -1" }}>
-                      <Plus size={16} />添加记录
+                      <Plus size={16} />手动添加记录
                     </button>
                   </form>
                 )}
@@ -755,12 +1012,13 @@ function App() {
                   ) : todayEvents.map((ev) => {
                     const cat = getCategory(data.categories, ev.category);
                     const proj = data.projects.find((p) => p.id === ev.projectId);
+                    const task = data.tasks.find((t) => t.id === ev.taskId);
                     return (
                       <div className="event-row" key={ev.id}>
                         <span className="event-swatch" style={{ background: cat.color }} />
                         <div className="event-info">
                           <strong>{ev.title}</strong>
-                          <small>{ev.category}{proj ? " · " + proj.name : ""}</small>
+                          <small>{ev.category}{proj ? " · " + proj.name : ""}{task ? " · " + task.title : ""}</small>
                         </div>
                         <span className="event-duration">{formatMinutes(ev.duration)}</span>
                         <button className="btn-icon danger" type="button" onClick={() => deleteEvent(ev.id)}>
